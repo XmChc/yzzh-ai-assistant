@@ -1,0 +1,24 @@
+{
+  "name": "@ysmp/ai-assistant-ui",
+  "version": "0.1.0",
+  "description": "AI 助手默认 UI（CSS 变量换肤）",
+  "type": "module",
+  "main": "./src/index.ts",
+  "module": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./style.css": "./src/style.css"
+  },
+  "files": [
+    "src"
+  ],
+  "peerDependencies": {
+    "vue": "^3.4.0"
+  },
+  "dependencies": {
+    "@ysmp/ai-assistant-core": "workspace:*"
+  },
+  "devDependencies": {
+    "vue": "3.5.13"
+  }
+}

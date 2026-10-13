@@ -1,0 +1,21 @@
+# Maven
+target/
+*.iml
+.idea/
+.classpath
+.project
+.settings/
+
+# Node
+node_modules/
+dist/
+*.local
+.turbo/
+.pnpm-store/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

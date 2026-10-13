@@ -1,0 +1,12 @@
+{
+  "name": "yzzh-ai-assistant-frontend",
+  "private": true,
+  "version": "0.1.0",
+  "description": "AI 助手前端 SDK workspace",
+  "scripts": {
+    "build": "pnpm -r run build"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

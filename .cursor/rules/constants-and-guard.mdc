@@ -1,0 +1,13 @@
+---
+description: 强制使用全局常量包与门禁 Guard，禁止魔法字符串
+alwaysApply: true
+---
+
+# 常量与门禁
+
+编写或修改本仓库代码时：
+
+1. 后端常量只从 `cn.ysmp.ai.constants` 引入（见 `AiConstants`）；鉴权辅助用 `cn.ysmp.ai.guard.AiAccessGuard`。
+2. 前端常量只从 `@ysmp/ai-assistant-core` 的 `constants.ts` 引入（`AiPermissions`、`AiAgentModes`、`AiMentionKeywords` 等）。
+3. 禁止新增内联权限码、Agent 模式、Tool 类型、`/admin-api/ai` 路径、@ 关键词字符串；先加常量再引用。
+4. 详细规范见仓库根目录 `AGENTS.md`。
