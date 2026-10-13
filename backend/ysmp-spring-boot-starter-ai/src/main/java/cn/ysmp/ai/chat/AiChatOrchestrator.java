@@ -193,6 +193,7 @@ public class AiChatOrchestrator {
         AiQueryIntentDetector.Detection queryDetection = AiQueryIntentDetector.analyze(request.getMessage());
         String queryIntent = queryDetection.intent();
         List<String> dashboardToolCodes = AiQueryIntentDetector.listDashboardToolCodes(bundle.getCallableTools());
+        AiQueryFallback.Plan fallbackPlan = AiQueryFallback.resolve(queryDetection, dashboardToolCodes);
         List<Map<String, Object>> openAiTools = toOpenAiToolMaps(bundle.getCallableTools(), queryIntent);
         SystemParts systemParts = buildSystemParts(bundle);
 
@@ -202,7 +203,8 @@ public class AiChatOrchestrator {
             systemWithSummary = systemParts.full + "\n\n# 对话摘要（早期轮次压缩）\n" + ctx.summary().trim();
         }
         systemWithSummary = systemWithSummary
-                + AiQueryIntentDetector.promptHint(queryDetection, dashboardToolCodes);
+                + AiQueryIntentDetector.promptHint(queryDetection, dashboardToolCodes)
+                + AiQueryFallback.promptSection(fallbackPlan);
 
         List<Map<String, Object>> messages = new ArrayList<>();
         messages.add(mutableMessage("system", systemWithSummary));
@@ -221,9 +223,12 @@ public class AiChatOrchestrator {
             int sumCompletion = 0;
             int sumTotal = 0;
             boolean hasApiUsage = false;
+            int toolRefusalCount = 0;
 
             for (int round = 0; round < AiLimits.MAX_TOOL_ROUNDS; round++) {
-                LlmCompletionResult result = llmClient.complete(cfg, messages, openAiTools);
+                // 兜底：连续拒调后不再给 tools，迫使模型直接回答/澄清
+                List<Map<String, Object>> toolsThisRound = toolRefusalCount >= 2 ? List.of() : openAiTools;
+                LlmCompletionResult result = llmClient.complete(cfg, messages, toolsThisRound);
                 if (result.getPromptTokens() != null) {
                     sumPrompt += result.getPromptTokens();
                     hasApiUsage = true;
@@ -237,7 +242,7 @@ public class AiChatOrchestrator {
                     hasApiUsage = true;
                 }
 
-                if (result.hasToolCalls() && round < AiLimits.MAX_TOOL_ROUNDS - 1) {
+                if (result.hasToolCalls() && round < AiLimits.MAX_TOOL_ROUNDS - 1 && toolRefusalCount < 2) {
                     @SuppressWarnings("unchecked")
                     Map<String, Object> assistantMsg = result.getAssistantMessage() instanceof Map
                             ? (Map<String, Object>) result.getAssistantMessage()
@@ -247,7 +252,12 @@ public class AiChatOrchestrator {
                     for (LlmToolCall call : result.getToolCalls()) {
                         sink.onToolCall(call.getId(), call.getName(), call.getArgumentsJson());
                         String rawResult = executeToolAllowed(
-                                call.getName(), call.getArgumentsJson(), callableMap, queryIntent);
+                                call.getName(), call.getArgumentsJson(), callableMap, queryIntent,
+                                fallbackPlan.blockDataFetch());
+                        if (isToolRefusal(rawResult)) {
+                            toolRefusalCount++;
+                            rawResult = AiQueryFallback.enrichRefusal(rawResult, fallbackPlan, toolRefusalCount);
+                        }
                         AiToolDefinition def = callableMap.get(call.getName());
                         AiToolResultCompactor.CompactOutcome compacted = toolResultCompactor.compact(
                                 rawResult,
@@ -281,6 +291,7 @@ public class AiChatOrchestrator {
             if (finalContent == null) {
                 finalContent = "";
             }
+            finalContent = AiQueryFallback.ensureUserFacingFallback(finalContent, fallbackPlan, toolRefusalCount);
 
             AiClarifyParser.Result clarifyResult = AiClarifyParser.parse(finalContent, objectMapper);
             String displayContent = clarifyResult.displayContent();
@@ -432,12 +443,13 @@ public class AiChatOrchestrator {
 
     private String executeToolAllowed(String toolCode, String argumentsJson,
                                       Map<String, AiToolDefinition> callableMap) {
-        return executeToolAllowed(toolCode, argumentsJson, callableMap, null);
+        return executeToolAllowed(toolCode, argumentsJson, callableMap, null, false);
     }
 
     private String executeToolAllowed(String toolCode, String argumentsJson,
                                       Map<String, AiToolDefinition> callableMap,
-                                      String queryIntent) {
+                                      String queryIntent,
+                                      boolean blockDataFetch) {
         Map<String, Object> arguments = parseJson(argumentsJson);
         Map<String, AiTool> builtinMap = builtinTools.stream()
                 .collect(Collectors.toMap(AiTool::getCode, Function.identity(), (a, b) -> a));
@@ -458,13 +470,23 @@ public class AiChatOrchestrator {
                     + "\"}";
         }
         if (AiToolTypes.OPENAPI.equals(def.getToolType())) {
-            AiToolQueryGuard.CheckResult gate = AiToolQueryGuard.check(def, arguments, queryIntent);
+            AiToolQueryGuard.CheckResult gate = AiToolQueryGuard.check(
+                    def, arguments, queryIntent, blockDataFetch);
             if (!gate.allowed()) {
                 return gate.refusalJson();
             }
             return openApiToolExecutor.execute(def, gate.sanitizedArgs());
         }
         return "{\"error\":\"unsupported tool type\"}";
+    }
+
+    private static boolean isToolRefusal(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return false;
+        }
+        return raw.contains(AiToolQueryGuard.ERROR_CODE)
+                || raw.contains(AiToolQueryGuard.ERROR_WRONG_TOOL)
+                || raw.contains(AiToolQueryGuard.ERROR_NEED_CLARIFY);
     }
 
     /**

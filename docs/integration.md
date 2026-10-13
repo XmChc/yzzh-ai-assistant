@@ -68,10 +68,10 @@ Tool 返回行数 ≥ `tool-result-compact-threshold-rows`（默认 20）或体�
 3. SSE `tool_data` 通知前端；结果面板展示列汇总 + 分页明细，调用  
    `/ai/assistant/tool-result/page`、`/tool-result/field`（嵌套数组）
 
-**查询安全与意图**（`AiQueryIntentDetector` / `AiQueryIntents` / `AiToolQueryGuard`）：
-- 有范围允许（`LIST` / `AGGREGATE`）；大屏类 `TREND|COMPARE|RANK|DISTRIBUTION` 优先大屏 Tool（描述标「大屏推荐」并前置排序）。
-- 门禁：无筛选分页 → `REFUSED_UNCONSTRAINED_QUERY`；大屏意图调明细分页 → `REFUSED_WRONG_TOOL_FOR_INTENT`；`CLARIFY_NEEDED`/`META` 拉数 → `REFUSED_NEED_CLARIFY_FIRST`。
-- 大屏 Tool 靠 code/name/path/description 含 `AiDashboardToolMarkers` 关键词识别；`stats.complete=false` 禁止本批 sum 当全量。
+**查询安全与意图**（`AiQueryIntentDetector` / `AiQueryFallback` / `AiToolQueryGuard`）：
+- 有范围允许（`LIST` / `AGGREGATE`）；大屏类优先大屏 Tool（「大屏推荐」+ 前置排序）。
+- 门禁：无筛选分页 / 错 Tool / 需先澄清 三类拒绝码。
+- **兜底**（`AiQueryFallback`）：无大屏 Tool → 禁止分页假扮并强制澄清改问；缺槽/`UNKNOWN` 无范围 → 只澄清；连续拒调 ≥2 → 去掉 tools 并在回复中补默认 `ai-clarify`。
 
 ```yaml
 ysmp:

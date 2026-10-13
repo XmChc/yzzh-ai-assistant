@@ -37,13 +37,21 @@ public final class AiToolQueryGuard {
     }
 
     public static CheckResult check(AiToolDefinition def, Map<String, Object> arguments) {
-        return check(def, arguments, null);
+        return check(def, arguments, null, false);
+    }
+
+    public static CheckResult check(AiToolDefinition def, Map<String, Object> arguments, String intent) {
+        return check(def, arguments, intent, false);
     }
 
     /**
-     * @param intent {@link AiQueryIntents}，可为 null
+     * @param intent              {@link AiQueryIntents}，可为 null
+     * @param blockDataFetch      兜底：本轮禁止拉数（无大屏/需澄清/META）
      */
-    public static CheckResult check(AiToolDefinition def, Map<String, Object> arguments, String intent) {
+    public static CheckResult check(AiToolDefinition def,
+                                    Map<String, Object> arguments,
+                                    String intent,
+                                    boolean blockDataFetch) {
         if (def == null) {
             return CheckResult.ok(arguments == null ? Map.of() : arguments);
         }
@@ -52,6 +60,17 @@ public final class AiToolQueryGuard {
                 : new LinkedHashMap<>(arguments);
 
         clampPageSize(args);
+
+        if (blockDataFetch) {
+            if (AiToolKindHints.looksLikePagedList(def) || AiToolKindHints.looksLikeDashboard(def)
+                    || AiQueryIntents.isDashboard(intent)) {
+                String why = AiQueryIntents.isDashboard(intent)
+                        ? "当前为大屏意图但无可用大屏 Tool（或需先澄清），禁止拉数硬查；请说明并 ai-clarify 改问明细/汇总。"
+                        : "当前兜底策略禁止本轮拉取分页/大屏数据，请先澄清或仅说明能力。";
+                return CheckResult.refuse(refusalJson(ERROR_NEED_CLARIFY, def.getToolCode(), List.of(),
+                        why, "clarify_first"));
+            }
+        }
 
         if (AiQueryIntents.CLARIFY_NEEDED.equals(intent) || AiQueryIntents.META.equals(intent)) {
             if (AiToolKindHints.looksLikePagedList(def) || AiToolKindHints.looksLikeDashboard(def)) {
