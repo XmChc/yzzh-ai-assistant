@@ -57,21 +57,37 @@ ysmp:
 
 需要可视化时，模型输出 \`\`\`ai-chart JSON 代码块。`type` 支持：`bar` / `horizontal_bar` / `line` / `area` / `stacked_bar` / `pie` / `donut` / `scatter` / `radar` / `funnel`。各类型字段需求已写入默认 system_prompt（见 `AiChartFormatSpecs`）。前端按 type 用 SVG 渲染，无需额外图表库。
 
+### RBAC 接入要点
+
+1. 实现 `AiSecurityAdapter`：`hasAnyPermissions` 对接宿主权限码；`getAuthorizationHeader` 转发当前用户 Token。  
+2. Tool 的 `required_permissions` / Schema **只允许同步、禁止手填**：注册时从 `@PreAuthorize` + OpenAPI 写入；变更后调 `resync-permissions` / `resync-schemas`（或管理页「同步权限码 / 同步 Schema」）。  
+3. 对话热路径只读 DB 中的权限码 + Adapter 预检；真正业务鉴权/数据范围在宿主 API 内完成。  
+4. 前端 `hasPermission` 与后端权限码保持一致（见 `AiPermissions`）。  
+5. **汇总 API（推荐）**：为「月总额」等提供聚合接口，描述中带 `汇总/合计/sum/total` 等词并挂业务权限码，注册为 OpenAPI Tool；AGGREGATE 意图会优先【汇总推荐】。  
+6. **写操作确认**：默认开启（`ysmp.ai.require-write-confirm=true`）；前端确认条回传 `confirmWriteTools`。  
+7. **受控查询（可选）**：无法提供 HTTP 汇总时，实现 `AiQueryCapabilityCatalog` + `AiDataScopeProvider` + `AiGovernedQueryExecutor`（见 `docs/architecture.md`）。
+
 ### Tool 大数据：压缩进模 + 结果分页
 
 Tool 返回行数 ≥ `tool-result-compact-threshold-rows`（默认 20）或体积较大时：
 
-1. 服务端解析结构并**全量暂存**（`refId`，TTL 默认 30 分钟）
-2. 进 LLM 的是 `fields` + `stats` + `sample` + `rowCount` 摘要  
-   - `stats`：单遍扫描列汇总（数值 min/max/sum/avg；分类 top 频次），供合计/分布类回答  
+1. 服务端解析结构并**全量暂存本批**（`refId`，TTL 默认 30 分钟）；**不做**多页 N+1 拉取  
+2. 进 LLM 的是 `fields` + `stats` + `sample` + `rowCount` + `coverage` 摘要  
+   - `stats`：单遍扫描列汇总（数值 min/max/sum/avg；分类 top 频次）  
+   - `coverage`：`coveredRows` / `reportedTotal` / `complete`；汇总回答必须带覆盖率  
    - `sample`：少量样例行，供举例与制表  
 3. SSE `tool_data` 通知前端；结果面板展示列汇总 + 分页明细，调用  
    `/ai/assistant/tool-result/page`、`/tool-result/field`（嵌套数组）
 
 **查询安全与意图**（`AiQueryIntentDetector` / `AiQueryFallback` / `AiToolQueryGuard`）：
 - 有范围允许（`LIST` / `AGGREGATE`）；大屏类优先大屏 Tool（「大屏推荐」+ 前置排序）。
+- `AGGREGATE`：优先聚合 Tool；仅分页时单页 + coverage；禁止多页加总。
 - 门禁：无筛选分页 / 错 Tool / 需先澄清 三类拒绝码。
-- **兜底**（`AiQueryFallback`）：无大屏 Tool → 禁止分页假扮并强制澄清改问；缺槽/`UNKNOWN` 无范围 → 只澄清；连续拒调 ≥2 → 去掉 tools 并在回复中补默认 `ai-clarify`。
+- **兜底决策**：
+  1. 分不清场景 / 缺槽 → `CLARIFY_ONLY`（`ai-clarify`）
+  2. 场景清晰但无匹配 Tool、仍可改问 → `DEGRADE_CLARIFY`
+  3. 无匹配 Tool 且无兜底 → `REFUSE`：不调模型硬编，直接回复拒绝原因与明细（Tool 计数等）
+  4. 连续拒调 ≥2 → 停 Tool；能澄清则澄清，否则拒绝说明原因
 
 ```yaml
 ysmp:

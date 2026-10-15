@@ -6,8 +6,8 @@
   --ai-radius: 8px;
   --ai-float-size: 52px;
   --ai-panel-width: 380px;
-  --ai-panel-width-wide: 640px;
-  --ai-panel-height: 560px;
+  --ai-panel-width-wide: 720px;
+  --ai-panel-height: 600px;
   --ai-font-size: 14px;
 }
 
@@ -833,4 +833,116 @@ textarea.ai-clarify-input {
   display: flex;
   flex-direction: column;
   min-width: 0;
+}
+
+.ai-write-confirm {
+  margin: 0 12px 8px;
+  padding: 12px 14px;
+  border: 1px solid #f0c36d;
+  background: #fff8e8;
+  border-radius: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.ai-write-confirm-body {
+  flex: 1;
+  min-width: 180px;
+}
+
+.ai-write-confirm-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #8a5a00;
+  margin-bottom: 4px;
+}
+
+.ai-write-confirm-text {
+  font-size: 13px;
+  color: #7a5a12;
+  line-height: 1.4;
+}
+
+.ai-write-confirm-preview {
+  margin-top: 6px;
+  font-size: 11px;
+  color: #a07830;
+  line-height: 1.35;
+  word-break: break-all;
+  max-height: 3.2em;
+  overflow: hidden;
+}
+
+.ai-write-confirm-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.ai-write-confirm-ok,
+.ai-write-confirm-cancel {
+  border: none;
+  border-radius: 6px;
+  padding: 7px 14px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.ai-write-confirm-ok {
+  background: #d48806;
+  color: #fff;
+}
+
+.ai-write-confirm-ok:hover:not(:disabled) {
+  background: #ad6800;
+}
+
+.ai-write-confirm-cancel {
+  background: #fff;
+  border: 1px solid #d9d9d9;
+  color: #333;
+}
+
+.ai-write-confirm-ok:disabled,
+.ai-write-confirm-cancel:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.ai-tool-coverage {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.ai-tool-coverage.is-complete {
+  background: #f6ffed;
+  border: 1px solid #b7eb8f;
+  color: #389e0d;
+}
+
+.ai-tool-coverage.is-partial {
+  background: #fff7e6;
+  border: 1px solid #ffd591;
+  color: #d46b08;
+}
+
+.ai-tool-coverage-title {
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.ai-tool-coverage-meta {
+  opacity: 0.92;
+}
+
+.ai-tool-coverage-hint {
+  margin-top: 4px;
+  opacity: 0.85;
 }

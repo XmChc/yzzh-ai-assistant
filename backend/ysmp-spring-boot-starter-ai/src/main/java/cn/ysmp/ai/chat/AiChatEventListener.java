@@ -19,6 +19,12 @@ public interface AiChatEventListener {
     default void onToolCall(String callId, String toolName, String argumentsJson) {
     }
 
+    /**
+     * 写操作待确认（尚未执行）。前端展示确认条，用户确认后带 {@code confirmWriteTools=true} 重发。
+     */
+    default void onToolConfirm(String callId, String toolName, String argumentsJson) {
+    }
+
     default void onToolResult(String callId, String toolName, String resultPreview) {
     }
 

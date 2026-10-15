@@ -14,6 +14,7 @@
   - @ 关键词 → `AiMentionKeywords`
 - **门禁校验**：优先 `cn.ysmp.ai.guard.AiAccessGuard`，不要在业务里硬编码 `"ai:assistant:query"` 等字符串。分页/列表 Tool 无业务筛选时由 `AiToolQueryGuard` 拒绝（防全表扫描）。
 - **查询意图**：`AiQueryIntents` / `AiQueryIntentDetector`；`TREND|COMPARE|RANK|DISTRIBUTION` 为大屏参数类，优先大屏相关 Tool。
+- **查询兜底**：`AiQueryFallback` — 分不清→澄清；无匹配 Tool 可降级→澄清改问；无兜底→明确拒绝原因（`REFUSE`）。
 - **前端唯一常量源**：`@ysmp/ai-assistant-core` 的 `constants.ts`（`AiPermissions`、`AiAgentModes`、`AiMentionKeywords` 等），须与后端常量语义对齐。
 - **禁止**：在 Controller / Service / UI 中新增魔法字符串（权限码、`SCENARIO`/`GENERAL`、`OPENAPI`、路径前缀、mention 关键词）。新增常量必须先写入 constants 包再引用。
 
@@ -30,8 +31,12 @@
 
 - Skill **无**独立 `access_permission`；激活条件：绑定 Tool **全部** `available`。
 - Agent：`access_permission` + `agent_mode`（`SCENARIO` | `GENERAL`）。
-- Tool 权限：SPI 仅在注册 / resync / 启动回填写入 DB；**对话热路径不调 SPI**。
+- Tool 权限 / Schema：**只允许从宿主同步**（注册 / `resync-permissions` / `resync-schemas` / 启动），**禁止**管理端或业务代码手填；**对话热路径不调 SPI**。
 - 可选 Agent：`ai:assistant:query` + Agent 权限 + 至少 1 个可用能力。
+- **RBAC 适配**：只认宿主权限码（与 `@PreAuthorize` 同源）；Catalog 预检 + 执行转发 Token；禁止表级 ACL / 助手直连业务库当默认路径。
+- **AGGREGATE**：优先聚合/GOVERNED Tool；分页仅单批 + `coverage`；禁止多页 N+1 加总。
+- **写操作**：命中 `AiWriteToolMarkers` 须 `confirmWriteTools`（SSE `tool_confirm`）；勿在未确认时执行。
+- **受控查询 SPI**：`AiQueryCapabilityCatalog` / `AiDataScopeProvider` / `AiGovernedQueryExecutor` 默认 NoOp；能力码非表名。
 
 ## 4. 代码风格
 

@@ -78,6 +78,13 @@ export async function chatStream(
           arguments: data.arguments != null ? String(data.arguments) : undefined,
         });
         break;
+      case AiSseEventTypes.TOOL_CONFIRM:
+        handlers.onToolConfirm?.({
+          id: String(data.id ?? ''),
+          name: String(data.name ?? ''),
+          arguments: data.arguments != null ? String(data.arguments) : undefined,
+        });
+        break;
       case AiSseEventTypes.TOOL_RESULT:
         handlers.onToolResult?.({
           id: String(data.id ?? ''),
@@ -258,6 +265,7 @@ export async function getToolResultField(params: {
   });
 }
 
+/** 从宿主 @PreAuthorize 等同步权限码到已注册 Tool（禁止手填） */
 export async function resyncToolPermissions(): Promise<number> {
   return useAiRuntime().request<number>({
     method: 'POST',
@@ -265,6 +273,7 @@ export async function resyncToolPermissions(): Promise<number> {
   });
 }
 
+/** 从当前 OpenAPI 同步入参/出参 Schema（禁止手填） */
 export async function resyncToolSchemas(): Promise<number> {
   return useAiRuntime().request<number>({
     method: 'POST',

@@ -1,7 +1,9 @@
 package cn.ysmp.ai.tool;
 
+import cn.ysmp.ai.constants.AiAggregateToolMarkers;
 import cn.ysmp.ai.constants.AiDashboardToolMarkers;
 import cn.ysmp.ai.constants.AiToolQueryParamNames;
+import cn.ysmp.ai.constants.AiWriteToolMarkers;
 
 import java.util.Locale;
 import java.util.Map;
@@ -52,6 +54,29 @@ public final class AiToolKindHints {
                 + " " + nz(def.getDescription())).toLowerCase(Locale.ROOT);
         return blob.contains("detail") || blob.contains("getbyid") || blob.contains("get-by")
                 || blob.contains("详情") || blob.contains("/get") || blob.contains("info");
+    }
+
+    /** 聚合/汇总接口（AGGREGATE 意图优先） */
+    public static boolean looksLikeAggregate(AiToolDefinition def) {
+        if (def == null || looksLikePagedList(def)) {
+            return false;
+        }
+        return AiAggregateToolMarkers.matchesText(def.getToolCode())
+                || AiAggregateToolMarkers.matchesText(def.getName())
+                || AiAggregateToolMarkers.matchesText(def.getPath())
+                || AiAggregateToolMarkers.matchesText(def.getDescription())
+                || AiAggregateToolMarkers.matchesText(def.getModule());
+    }
+
+    /** 写操作（须用户确认后执行） */
+    public static boolean looksLikeWrite(AiToolDefinition def) {
+        if (def == null) {
+            return false;
+        }
+        return AiWriteToolMarkers.matchesText(def.getToolCode())
+                || AiWriteToolMarkers.matchesText(def.getName())
+                || AiWriteToolMarkers.matchesText(def.getPath())
+                || AiWriteToolMarkers.matchesText(def.getDescription());
     }
 
     @SuppressWarnings("unchecked")

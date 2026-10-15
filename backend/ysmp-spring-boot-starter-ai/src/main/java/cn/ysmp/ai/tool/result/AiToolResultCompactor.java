@@ -47,10 +47,11 @@ public class AiToolResultCompactor {
             int pageSize,
             List<Map<String, Object>> sampleRows,
             Map<String, Object> stats,
+            Map<String, Object> coverage,
             boolean compacted
     ) {
         public Map<String, Object> toMap() {
-            Map<String, Object> m = new LinkedHashMap<>(12);
+            Map<String, Object> m = new LinkedHashMap<>(14);
             m.put("refId", refId);
             m.put("toolCode", toolCode);
             m.put("shape", shape);
@@ -63,6 +64,9 @@ public class AiToolResultCompactor {
             m.put("sampleRows", sampleRows);
             if (stats != null && !stats.isEmpty()) {
                 m.put("stats", stats);
+            }
+            if (coverage != null && !coverage.isEmpty()) {
+                m.put("coverage", coverage);
             }
             m.put("compacted", compacted);
             return m;
@@ -161,28 +165,21 @@ public class AiToolResultCompactor {
         for (String f : fields) {
             fieldsNode.add(f);
         }
-        boolean statsComplete = located.reportedTotal == null || located.reportedTotal <= rowCount;
+        boolean statsComplete = AiToolResultCoverage.isComplete(rowCount, located.reportedTotal);
+        Map<String, Object> coverage = AiToolResultCoverage.toMap(rowCount, located.reportedTotal);
         statsView.put("complete", statsComplete);
         if (located.reportedTotal != null) {
             statsView.put("reportedTotal", located.reportedTotal);
         }
         summary.set("stats", objectMapper.valueToTree(statsView));
         summary.set("sample", objectMapper.valueToTree(sampleView));
+        summary.set("coverage", objectMapper.valueToTree(coverage));
         summary.put("statsComplete", statsComplete);
-        if (statsComplete) {
-            summary.put("note", "完整结果已暂存 refId=" + refId
-                    + "。明细用 sample/结果面板；汇总可用 stats（complete=true）。"
-                    + "禁止再要全量原始 JSON。");
-        } else {
-            summary.put("note", "完整结果已暂存 refId=" + refId
-                    + "。reportedTotal=" + located.reportedTotal + " > 本批 rowCount=" + rowCount
-                    + "，stats.complete=false：本批 sum/avg 不是筛选范围内全量汇总。"
-                    + "明细可继续面板翻页；若用户要总数/合计，请换聚合 Tool 或缩小范围后重试，禁止多页循环加总。");
-        }
+        summary.put("note", AiToolResultCoverage.note(refId, rowCount, located.reportedTotal, statsComplete));
 
         ToolDataRef ref = new ToolDataRef(
                 refId, toolCode, located.shape, fields,
-                rowCount, located.reportedTotal, pageSize, sampleView, statsView, true);
+                rowCount, located.reportedTotal, pageSize, sampleView, statsView, coverage, true);
         try {
             return new CompactOutcome(objectMapper.writeValueAsString(summary), ref);
         } catch (Exception e) {

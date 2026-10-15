@@ -9,6 +9,7 @@ import java.util.Map;
 /**
  * 门禁辅助：基于 {@link AiPermissionConstants} 与宿主 {@link AiSecurityAdapter} 的统一校验入口。
  * <p>业务代码优先调用本类，避免散落权限码字符串。
+ * <p>RBAC：此处只做权限<strong>码</strong>预检；行级数据范围依赖执行期转发 Token 后的宿主拦截器。
  */
 public final class AiAccessGuard {
 

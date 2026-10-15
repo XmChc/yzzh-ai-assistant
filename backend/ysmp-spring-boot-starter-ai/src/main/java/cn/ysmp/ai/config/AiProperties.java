@@ -67,6 +67,11 @@ public class AiProperties {
      */
     private Security security = new Security();
 
+    /**
+     * 写操作 Tool 是否必须用户确认后才执行（默认 true）。
+     */
+    private boolean requireWriteConfirm = true;
+
     @Data
     public static class Security {
         private boolean permitAllWhenMissing = false;

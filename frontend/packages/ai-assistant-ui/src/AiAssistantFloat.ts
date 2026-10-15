@@ -1,5 +1,6 @@
 import {
   AiPermissions,
+  AiWriteConfirm,
   chatStream,
   deleteChatSession,
   getAssistantCapabilities,
@@ -13,13 +14,14 @@ import {
   type AiContextUsage,
   type AiToolDataRef,
 } from '@ysmp/ai-assistant-core';
-import { defineComponent, ref, h, watch, onMounted, computed } from 'vue';
+import { defineComponent, ref, h, watch, onMounted, computed, nextTick } from 'vue';
 import { detectMention, type MentionKind } from './mention';
 import { renderMarkdown } from './markdownRender';
 import { initClarifyValues, renderClarifyForm } from './ClarifyFormPanel';
 import { splitContentWithCharts } from './chartParse';
 import { renderChart } from './ChartPanel';
 import { ToolResultPanel } from './ToolResultPanel';
+import { renderWriteConfirmBar } from './WriteConfirmBar';
 
 interface Msg {
   role: 'user' | 'assistant' | 'system';
@@ -56,6 +58,9 @@ export const AiAssistantFloat = defineComponent({
     const usage = ref<AiContextUsage | null>(null);
     const showUsage = ref(false);
     const toolDataList = ref<AiToolDataRef[]>([]);
+    const pendingWriteConfirms = ref<Array<{ id: string; name: string; arguments?: string }>>([]);
+    const lastUserText = ref('');
+    const chatBodyEl = ref<HTMLElement | null>(null);
 
     const agentCode = ref<string | undefined>();
     const skillCode = ref<string | undefined>();
@@ -122,6 +127,8 @@ export const AiAssistantFloat = defineComponent({
       sessionId.value = sid;
       usage.value = null;
       toolDataList.value = [];
+      pendingWriteConfirms.value = [];
+      lastUserText.value = '';
       try {
         const rows = await listChatMessages(sid);
         messages.value = rows
@@ -140,6 +147,8 @@ export const AiAssistantFloat = defineComponent({
       messages.value = [];
       usage.value = null;
       toolDataList.value = [];
+      pendingWriteConfirms.value = [];
+      lastUserText.value = '';
     }
 
     async function removeSession(sid: string, e: Event) {
@@ -260,19 +269,40 @@ export const AiAssistantFloat = defineComponent({
       }
     }
 
-    async function sendMessage(text: string) {
+    function scrollChatToBottom() {
+      void nextTick(() => {
+        const el = chatBodyEl.value;
+        if (el) el.scrollTop = el.scrollHeight;
+      });
+    }
+
+    async function sendMessage(
+      text: string,
+      opts?: { confirmWriteTools?: boolean; hideUserBubble?: boolean },
+    ) {
       const body = text.trim();
       if (!body || loading.value) return;
-      messages.value.push({ role: 'user', content: body });
+      if (!opts?.confirmWriteTools) {
+        lastUserText.value = body;
+        pendingWriteConfirms.value = [];
+      }
+      if (opts?.hideUserBubble) {
+        messages.value.push({ role: 'system', content: '已确认，正在执行写操作…' });
+      } else {
+        messages.value.push({ role: 'user', content: body });
+      }
       loading.value = true;
+      scrollChatToBottom();
 
       let assistantIdx = messages.value.length;
       messages.value.push({ role: 'assistant', content: '' });
+      const startedTools = new Map<string, string>();
 
       const insertBeforeAssistant = (msg: Msg) => {
         messages.value.splice(assistantIdx, 0, msg);
         assistantIdx += 1;
         messages.value = [...messages.value];
+        scrollChatToBottom();
       };
 
       try {
@@ -283,6 +313,7 @@ export const AiAssistantFloat = defineComponent({
             agentCode: agentCode.value,
             skillCode: skillCode.value,
             toolCode: toolCode.value,
+            confirmWriteTools: opts?.confirmWriteTools === true ? true : undefined,
           },
           {
             onMeta: (sid) => {
@@ -298,18 +329,51 @@ export const AiAssistantFloat = defineComponent({
                 cur.clarifyValues = initClarifyValues(form);
                 cur.clarifyAnswered = false;
                 messages.value = [...messages.value];
+                scrollChatToBottom();
               }
             },
             onToolCall: (p) => {
+              startedTools.set(p.id, p.name);
               insertBeforeAssistant({
                 role: 'system',
                 content: `调用工具 ${p.name}…`,
               });
             },
-            onToolResult: (p) => {
+            onToolConfirm: (p) => {
+              const next = pendingWriteConfirms.value.filter((x) => x.id !== p.id);
+              next.push({ id: p.id, name: p.name, arguments: p.arguments });
+              pendingWriteConfirms.value = next;
+              const callLabel = `调用工具 ${startedTools.get(p.id) || p.name}…`;
+              const cleaned = messages.value.filter(
+                (m, i) => !(i < assistantIdx && m.role === 'system' && m.content === callLabel),
+              );
+              const removed = messages.value.length - cleaned.length;
+              if (removed > 0) {
+                assistantIdx -= removed;
+                messages.value = cleaned;
+              }
               insertBeforeAssistant({
                 role: 'system',
-                content: `工具 ${p.name} 返回：${(p.preview || '').slice(0, 200)}`,
+                content: `写操作待确认：${p.name}`,
+              });
+            },
+            onToolResult: (p) => {
+              const preview = p.preview || '';
+              if (preview.includes(AiWriteConfirm.STATUS_NEED_CONFIRM)) {
+                return;
+              }
+              const callLabel = `调用工具 ${startedTools.get(p.id) || p.name}…`;
+              const cleaned = messages.value.filter(
+                (m, i) => !(i < assistantIdx && m.role === 'system' && m.content === callLabel),
+              );
+              const removed = messages.value.length - cleaned.length;
+              if (removed > 0) {
+                assistantIdx -= removed;
+                messages.value = cleaned;
+              }
+              insertBeforeAssistant({
+                role: 'system',
+                content: `工具 ${p.name} 完成：${preview.slice(0, 160)}`,
               });
             },
             onToolData: (data) => {
@@ -317,12 +381,14 @@ export const AiAssistantFloat = defineComponent({
               const next = toolDataList.value.filter((d) => d.refId !== data.refId);
               next.push(data);
               toolDataList.value = next;
+              scrollChatToBottom();
             },
             onDelta: (chunk) => {
               const cur = messages.value[assistantIdx];
               if (cur && cur.role === 'assistant') {
                 cur.content += chunk;
                 messages.value = [...messages.value];
+                scrollChatToBottom();
               }
             },
             onDone: (full) => {
@@ -331,6 +397,7 @@ export const AiAssistantFloat = defineComponent({
                 cur.content = full;
                 messages.value = [...messages.value];
               }
+              scrollChatToBottom();
               void loadSessions();
             },
             onError: (msg) => {
@@ -341,6 +408,7 @@ export const AiAssistantFloat = defineComponent({
               } else {
                 messages.value.push({ role: 'assistant', content: msg });
               }
+              scrollChatToBottom();
             },
           },
         );
@@ -353,9 +421,26 @@ export const AiAssistantFloat = defineComponent({
         } else {
           messages.value.push({ role: 'assistant', content: err });
         }
+        scrollChatToBottom();
       } finally {
         loading.value = false;
       }
+    }
+
+    async function confirmWrite() {
+      const text = lastUserText.value.trim();
+      if (!text || loading.value) return;
+      pendingWriteConfirms.value = [];
+      await sendMessage(text, { confirmWriteTools: true, hideUserBubble: true });
+    }
+
+    function cancelWrite() {
+      pendingWriteConfirms.value = [];
+      messages.value.push({
+        role: 'system',
+        content: '已取消写操作，未执行任何变更。',
+      });
+      scrollChatToBottom();
     }
 
     async function send() {
@@ -532,7 +617,10 @@ export const AiAssistantFloat = defineComponent({
                   ]),
                   h(
                     'div',
-                    { class: 'ai-panel-body' },
+                    {
+                      class: 'ai-panel-body',
+                      ref: chatBodyEl,
+                    },
                     messages.value.map((m, idx) => {
                       const isUser = m.role === 'user';
                       const isSystem = m.role === 'system';
@@ -587,6 +675,12 @@ export const AiAssistantFloat = defineComponent({
                       ),
                     ),
                   ),
+                  renderWriteConfirmBar({
+                    items: pendingWriteConfirms.value,
+                    loading: loading.value,
+                    onConfirm: () => void confirmWrite(),
+                    onCancel: cancelWrite,
+                  }),
                   h('div', { class: 'ai-panel-footer ai-panel-footer-col' }, [
                     showPicker.value
                       ? h('div', { class: 'ai-mention-picker' }, [

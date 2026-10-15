@@ -18,4 +18,9 @@ public class AiChatRequest {
     private String toolCode;
     /** 用户问题 */
     private String message;
+    /**
+     * 用户已确认执行本轮写操作 Tool（前端确认条回传）。
+     * 未确认时写操作 Tool 不会真正调用宿主 API。
+     */
+    private Boolean confirmWriteTools;
 }

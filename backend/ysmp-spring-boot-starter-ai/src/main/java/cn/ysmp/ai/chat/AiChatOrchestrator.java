@@ -7,16 +7,27 @@ import cn.ysmp.ai.constants.AiClarifyConstants;
 import cn.ysmp.ai.constants.AiLimits;
 import cn.ysmp.ai.constants.AiQueryIntents;
 import cn.ysmp.ai.constants.AiToolTypes;
+import cn.ysmp.ai.constants.AiWriteConfirmConstants;
 import cn.ysmp.ai.guard.AiAccessGuard;
 import cn.ysmp.ai.guard.AiToolQueryGuard;
 import cn.ysmp.ai.llm.LlmCompletionResult;
 import cn.ysmp.ai.llm.LlmToolCall;
 import cn.ysmp.ai.llm.OpenAiCompatibleClient;
 import cn.ysmp.ai.spi.AiChatMemory;
+import cn.ysmp.ai.spi.AiDataScope;
+import cn.ysmp.ai.spi.AiDataScopeProvider;
+import cn.ysmp.ai.spi.AiGovernedQueryExecutor;
+import cn.ysmp.ai.spi.AiGovernedQueryRequest;
+import cn.ysmp.ai.spi.AiGovernedQueryResult;
 import cn.ysmp.ai.spi.AiLlmConfigProvider;
 import cn.ysmp.ai.spi.AiLlmRuntimeConfig;
+import cn.ysmp.ai.spi.AiQueryCapability;
+import cn.ysmp.ai.spi.AiQueryCapabilityCatalog;
 import cn.ysmp.ai.spi.AiSecurityAdapter;
 import cn.ysmp.ai.spi.NoOpAiChatMemory;
+import cn.ysmp.ai.spi.NoOpAiDataScopeProvider;
+import cn.ysmp.ai.spi.NoOpAiGovernedQueryExecutor;
+import cn.ysmp.ai.spi.NoOpAiQueryCapabilityCatalog;
 import cn.ysmp.ai.tool.AiCapabilityBundle;
 import cn.ysmp.ai.tool.AiSkillHint;
 import cn.ysmp.ai.tool.AiTool;
@@ -34,8 +45,10 @@ import org.springframework.beans.factory.ObjectProvider;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -57,6 +70,9 @@ public class AiChatOrchestrator {
     private final AiProperties properties;
     private final AiConversationCompressor conversationCompressor;
     private final AiToolResultCompactor toolResultCompactor;
+    private final AiQueryCapabilityCatalog queryCapabilityCatalog;
+    private final AiDataScopeProvider dataScopeProvider;
+    private final AiGovernedQueryExecutor governedQueryExecutor;
 
     public AiChatOrchestrator(AiLlmConfigProvider llmConfigProvider,
                               AiToolCatalog toolCatalog,
@@ -69,6 +85,25 @@ public class AiChatOrchestrator {
                               AiProperties properties,
                               AiConversationCompressor conversationCompressor,
                               AiToolResultCompactor toolResultCompactor) {
+        this(llmConfigProvider, toolCatalog, securityAdapter, llmClient, openApiToolExecutor,
+                builtinTools, objectMapper, chatMemoryProvider, properties, conversationCompressor,
+                toolResultCompactor, null, null, null);
+    }
+
+    public AiChatOrchestrator(AiLlmConfigProvider llmConfigProvider,
+                              AiToolCatalog toolCatalog,
+                              AiSecurityAdapter securityAdapter,
+                              OpenAiCompatibleClient llmClient,
+                              OpenApiToolExecutor openApiToolExecutor,
+                              List<AiTool> builtinTools,
+                              ObjectMapper objectMapper,
+                              ObjectProvider<AiChatMemory> chatMemoryProvider,
+                              AiProperties properties,
+                              AiConversationCompressor conversationCompressor,
+                              AiToolResultCompactor toolResultCompactor,
+                              AiQueryCapabilityCatalog queryCapabilityCatalog,
+                              AiDataScopeProvider dataScopeProvider,
+                              AiGovernedQueryExecutor governedQueryExecutor) {
         this.llmConfigProvider = llmConfigProvider;
         this.toolCatalog = toolCatalog;
         this.securityAdapter = securityAdapter;
@@ -80,6 +115,12 @@ public class AiChatOrchestrator {
         this.properties = properties;
         this.conversationCompressor = conversationCompressor;
         this.toolResultCompactor = toolResultCompactor;
+        this.queryCapabilityCatalog = queryCapabilityCatalog != null
+                ? queryCapabilityCatalog : NoOpAiQueryCapabilityCatalog.INSTANCE;
+        this.dataScopeProvider = dataScopeProvider != null
+                ? dataScopeProvider : NoOpAiDataScopeProvider.INSTANCE;
+        this.governedQueryExecutor = governedQueryExecutor != null
+                ? governedQueryExecutor : NoOpAiGovernedQueryExecutor.INSTANCE;
     }
 
     private AiChatMemory memory() {
@@ -182,19 +223,23 @@ public class AiChatOrchestrator {
             sink.onError(bundle.getError());
             return;
         }
-        if (bundle.getCallableTools() == null || bundle.getCallableTools().isEmpty()) {
-            sink.onError("当前 Agent 无可用工具（Skill 未激活或权限不足）");
+
+        List<AiToolDefinition> callableTools = new ArrayList<>(
+                bundle.getCallableTools() == null ? List.of() : bundle.getCallableTools());
+        mergeGovernedCapabilities(callableTools);
+        if (callableTools.isEmpty()) {
+            sink.onError("当前 Agent 无可用工具（Skill 未激活、权限不足或未配置受控查询能力）");
             return;
         }
-
-        Map<String, AiToolDefinition> callableMap = bundle.getCallableTools().stream()
+        Map<String, AiToolDefinition> callableMap = callableTools.stream()
                 .collect(Collectors.toMap(AiToolDefinition::getToolCode, Function.identity(), (a, b) -> a,
                         LinkedHashMap::new));
         AiQueryIntentDetector.Detection queryDetection = AiQueryIntentDetector.analyze(request.getMessage());
         String queryIntent = queryDetection.intent();
-        List<String> dashboardToolCodes = AiQueryIntentDetector.listDashboardToolCodes(bundle.getCallableTools());
-        AiQueryFallback.Plan fallbackPlan = AiQueryFallback.resolve(queryDetection, dashboardToolCodes);
-        List<Map<String, Object>> openAiTools = toOpenAiToolMaps(bundle.getCallableTools(), queryIntent);
+        List<String> dashboardToolCodes = AiQueryIntentDetector.listDashboardToolCodes(callableTools);
+        AiQueryFallback.Plan fallbackPlan = AiQueryFallback.resolve(queryDetection, callableTools);
+        List<Map<String, Object>> openAiTools = toOpenAiToolMaps(callableTools, queryIntent);
+        boolean writeConfirmed = Boolean.TRUE.equals(request.getConfirmWriteTools());
         SystemParts systemParts = buildSystemParts(bundle);
 
         PreparedContext ctx = prepareContext(chatMemory, cfg, sessionId);
@@ -224,10 +269,26 @@ public class AiChatOrchestrator {
             int sumTotal = 0;
             boolean hasApiUsage = false;
             int toolRefusalCount = 0;
+            boolean awaitingWriteConfirm = false;
+            Set<String> pendingWriteNames = new LinkedHashSet<>();
+
+            // 无合适 Tool 且无兜底：直接拒绝并说明原因，不调用模型硬编
+            if (fallbackPlan.skipLlm()) {
+                finalContent = AiQueryFallback.buildRefuseMessage(fallbackPlan, null);
+                chatMemory.appendMessage(sessionId, "user", request.getMessage(), null);
+                chatMemory.appendMessage(sessionId, "assistant", finalContent, null);
+                sink.onUsage(usage);
+                if (emitChunkedContent) {
+                    emitChunked(sink, finalContent);
+                }
+                sink.onDone(finalContent);
+                return;
+            }
 
             for (int round = 0; round < AiLimits.MAX_TOOL_ROUNDS; round++) {
-                // 兜底：连续拒调后不再给 tools，迫使模型直接回答/澄清
-                List<Map<String, Object>> toolsThisRound = toolRefusalCount >= 2 ? List.of() : openAiTools;
+                // 兜底：需澄清/降级/连续拒调 → 不给 tools，避免空转
+                boolean noTools = fallbackPlan.forceNoTools() || toolRefusalCount >= 2;
+                List<Map<String, Object>> toolsThisRound = noTools ? List.of() : openAiTools;
                 LlmCompletionResult result = llmClient.complete(cfg, messages, toolsThisRound);
                 if (result.getPromptTokens() != null) {
                     sumPrompt += result.getPromptTokens();
@@ -242,7 +303,8 @@ public class AiChatOrchestrator {
                     hasApiUsage = true;
                 }
 
-                if (result.hasToolCalls() && round < AiLimits.MAX_TOOL_ROUNDS - 1 && toolRefusalCount < 2) {
+                if (result.hasToolCalls() && round < AiLimits.MAX_TOOL_ROUNDS - 1
+                        && toolRefusalCount < 2 && !fallbackPlan.forceNoTools()) {
                     @SuppressWarnings("unchecked")
                     Map<String, Object> assistantMsg = result.getAssistantMessage() instanceof Map
                             ? (Map<String, Object>) result.getAssistantMessage()
@@ -251,14 +313,30 @@ public class AiChatOrchestrator {
 
                     for (LlmToolCall call : result.getToolCalls()) {
                         sink.onToolCall(call.getId(), call.getName(), call.getArgumentsJson());
-                        String rawResult = executeToolAllowed(
-                                call.getName(), call.getArgumentsJson(), callableMap, queryIntent,
-                                fallbackPlan.blockDataFetch());
+                        AiToolDefinition def = callableMap.get(call.getName());
+                        boolean needWriteConfirm = properties.isRequireWriteConfirm()
+                                && !writeConfirmed
+                                && AiToolKindHints.looksLikeWrite(def);
+                        String rawResult;
+                        if (needWriteConfirm) {
+                            awaitingWriteConfirm = true;
+                            pendingWriteNames.add(call.getName());
+                            sink.onToolConfirm(call.getId(), call.getName(), call.getArgumentsJson());
+                            rawResult = "{\"" + AiWriteConfirmConstants.FIELD_STATUS + "\":\""
+                                    + AiWriteConfirmConstants.STATUS_NEED_CONFIRM + "\",\""
+                                    + AiWriteConfirmConstants.FIELD_TOOL + "\":\""
+                                    + escape(call.getName()) + "\",\""
+                                    + AiWriteConfirmConstants.FIELD_MESSAGE
+                                    + "\":\"写操作待用户确认，尚未执行\"}";
+                        } else {
+                            rawResult = executeToolAllowed(
+                                    call.getName(), call.getArgumentsJson(), callableMap, queryIntent,
+                                    fallbackPlan.blockDataFetch(), sessionId, userId);
+                        }
                         if (isToolRefusal(rawResult)) {
                             toolRefusalCount++;
                             rawResult = AiQueryFallback.enrichRefusal(rawResult, fallbackPlan, toolRefusalCount);
                         }
-                        AiToolDefinition def = callableMap.get(call.getName());
                         AiToolResultCompactor.CompactOutcome compacted = toolResultCompactor.compact(
                                 rawResult,
                                 call.getName(),
@@ -277,6 +355,10 @@ public class AiChatOrchestrator {
                         toolMsg.put("content", forLlm);
                         messages.add(toolMsg);
                     }
+                    if (awaitingWriteConfirm) {
+                        finalContent = buildWriteConfirmMessage(new ArrayList<>(pendingWriteNames));
+                        break;
+                    }
                     continue;
                 }
 
@@ -291,7 +373,10 @@ public class AiChatOrchestrator {
             if (finalContent == null) {
                 finalContent = "";
             }
-            finalContent = AiQueryFallback.ensureUserFacingFallback(finalContent, fallbackPlan, toolRefusalCount);
+            if (!awaitingWriteConfirm) {
+                finalContent = AiQueryFallback.ensureUserFacingFallback(
+                        finalContent, fallbackPlan, toolRefusalCount);
+            }
 
             AiClarifyParser.Result clarifyResult = AiClarifyParser.parse(finalContent, objectMapper);
             String displayContent = clarifyResult.displayContent();
@@ -443,13 +528,15 @@ public class AiChatOrchestrator {
 
     private String executeToolAllowed(String toolCode, String argumentsJson,
                                       Map<String, AiToolDefinition> callableMap) {
-        return executeToolAllowed(toolCode, argumentsJson, callableMap, null, false);
+        return executeToolAllowed(toolCode, argumentsJson, callableMap, null, false, null, null);
     }
 
     private String executeToolAllowed(String toolCode, String argumentsJson,
                                       Map<String, AiToolDefinition> callableMap,
                                       String queryIntent,
-                                      boolean blockDataFetch) {
+                                      boolean blockDataFetch,
+                                      String sessionId,
+                                      Long userId) {
         Map<String, Object> arguments = parseJson(argumentsJson);
         Map<String, AiTool> builtinMap = builtinTools.stream()
                 .collect(Collectors.toMap(AiTool::getCode, Function.identity(), (a, b) -> a));
@@ -469,6 +556,9 @@ public class AiChatOrchestrator {
                     + (def.getUnavailableReason() == null ? "permission denied" : def.getUnavailableReason())
                     + "\"}";
         }
+        if (AiToolTypes.GOVERNED.equals(def.getToolType())) {
+            return executeGoverned(toolCode, arguments, sessionId, userId);
+        }
         if (AiToolTypes.OPENAPI.equals(def.getToolType())) {
             AiToolQueryGuard.CheckResult gate = AiToolQueryGuard.check(
                     def, arguments, queryIntent, blockDataFetch);
@@ -478,6 +568,76 @@ public class AiChatOrchestrator {
             return openApiToolExecutor.execute(def, gate.sanitizedArgs());
         }
         return "{\"error\":\"unsupported tool type\"}";
+    }
+
+    private String executeGoverned(String capabilityCode,
+                                   Map<String, Object> arguments,
+                                   String sessionId,
+                                   Long userId) {
+        if (!governedQueryExecutor.supports(capabilityCode)) {
+            return "{\"error\":\"governed capability not supported: " + escape(capabilityCode) + "\"}";
+        }
+        AiDataScope scope = dataScopeProvider.resolve(capabilityCode);
+        if (scope == null || !scope.isAllowed()) {
+            String reason = scope == null ? "数据权限不足" : scope.getReason();
+            return "{\"error\":\"DATA_SCOPE_DENIED\",\"message\":\"" + escape(reason) + "\"}";
+        }
+        AiGovernedQueryResult result = governedQueryExecutor.execute(AiGovernedQueryRequest.builder()
+                .capabilityCode(capabilityCode)
+                .params(arguments == null ? Map.of() : arguments)
+                .scope(scope)
+                .sessionId(sessionId)
+                .userId(userId)
+                .build());
+        if (result == null) {
+            return "{\"error\":\"governed query returned null\"}";
+        }
+        if (!result.isSuccess()) {
+            return result.getContent() != null ? result.getContent()
+                    : "{\"error\":\"" + escape(result.getError()) + "\"}";
+        }
+        return result.getContent() == null ? "{}" : result.getContent();
+    }
+
+    private void mergeGovernedCapabilities(List<AiToolDefinition> callableTools) {
+        List<AiQueryCapability> caps = queryCapabilityCatalog.listAvailable();
+        if (caps == null || caps.isEmpty()) {
+            return;
+        }
+        for (AiQueryCapability cap : caps) {
+            if (cap == null || cap.getCode() == null || cap.getCode().isBlank()) {
+                continue;
+            }
+            if (!governedQueryExecutor.supports(cap.getCode())) {
+                continue;
+            }
+            boolean exists = callableTools.stream()
+                    .anyMatch(t -> cap.getCode().equals(t.getToolCode()));
+            if (exists) {
+                continue;
+            }
+            callableTools.add(AiToolDefinition.builder()
+                    .toolCode(cap.getCode())
+                    .toolType(AiToolTypes.GOVERNED)
+                    .name(cap.getName() == null ? cap.getCode() : cap.getName())
+                    .description(cap.getDescription() == null
+                            ? ("受控查询能力 " + cap.getCode())
+                            : cap.getDescription())
+                    .requiredPermissions(cap.getRequiredPermissions())
+                    .parametersSchema(cap.getParametersSchema() == null
+                            ? Map.of("type", "object", "properties", Map.of())
+                            : cap.getParametersSchema())
+                    .available(true)
+                    .build());
+        }
+    }
+
+    private static String buildWriteConfirmMessage(List<String> toolNames) {
+        String names = toolNames == null || toolNames.isEmpty()
+                ? "写操作"
+                : String.join("、", toolNames);
+        return "以下写操作需要你确认后才会执行：**" + names + "**。\n\n"
+                + "请点击下方「确认执行」继续，或「取消」放弃本次写操作。";
     }
 
     private static boolean isToolRefusal(String raw) {
@@ -581,6 +741,10 @@ public class AiChatOrchestrator {
             ordered.sort((a, b) -> Boolean.compare(
                     AiToolKindHints.looksLikeDashboard(b),
                     AiToolKindHints.looksLikeDashboard(a)));
+        } else if (AiQueryIntents.AGGREGATE.equals(queryIntent)) {
+            ordered.sort((a, b) -> Boolean.compare(
+                    AiToolKindHints.looksLikeAggregate(b) || AiToolTypes.GOVERNED.equals(b.getToolType()),
+                    AiToolKindHints.looksLikeAggregate(a) || AiToolTypes.GOVERNED.equals(a.getToolType())));
         } else if (AiQueryIntents.LOOKUP.equals(queryIntent) || AiQueryIntents.STATUS.equals(queryIntent)) {
             ordered.sort((a, b) -> Boolean.compare(
                     AiToolKindHints.looksLikeDetailLookup(b),
@@ -593,6 +757,8 @@ public class AiChatOrchestrator {
             String baseDesc = t.getDescription() == null ? t.getName() : t.getDescription();
             if (AiToolKindHints.looksLikeDashboard(t)) {
                 baseDesc = "【大屏推荐】" + (baseDesc == null ? "" : baseDesc);
+            } else if (AiToolKindHints.looksLikeAggregate(t) || AiToolTypes.GOVERNED.equals(t.getToolType())) {
+                baseDesc = "【汇总推荐】" + (baseDesc == null ? "" : baseDesc);
             } else if (AiToolKindHints.looksLikeDetailLookup(t)) {
                 baseDesc = "【详情推荐】" + (baseDesc == null ? "" : baseDesc);
             } else if (AiToolKindHints.looksLikePagedList(t)) {
@@ -650,8 +816,9 @@ public class AiChatOrchestrator {
                 + "有明确范围的查询允许执行；禁止无范围全表扫描。\n"
                 + "意图与 Tool 选型：\n"
                 + "- " + AiQueryIntents.LIST + "「最近1个月的订单」→ 分页/列表 Tool + 时间约束，面板翻页。\n"
-                + "- " + AiQueryIntents.AGGREGATE + "「最近1个月订单金额总数」→ 聚合 Tool；"
-                + "勿多页加总；stats.complete=false 不得当全量。\n"
+                + "- " + AiQueryIntents.AGGREGATE + "「最近1个月订单金额总数」→ 优先聚合 Tool；"
+                + "仅有分页时单页 + coverage；勿多页加总（N+1）；"
+                + "complete=false 可报本批合计但须写覆盖行数/总数。\n"
                 + "- " + AiQueryIntents.TREND + "/" + AiQueryIntents.COMPARE + "/"
                 + AiQueryIntents.RANK + "/" + AiQueryIntents.DISTRIBUTION
                 + "（趋势/对比/排行/分布）→ **大屏参数类**，必须优先大屏/看板/指标类 Tool，"
@@ -661,18 +828,23 @@ public class AiChatOrchestrator {
                 + "- " + AiQueryIntents.EXPORT + " → 导出接口；" + AiQueryIntents.ACTION
                 + " → 先澄清再写操作；" + AiQueryIntents.CLARIFY_NEEDED
                 + " → 本轮不调分页 Tool。\n"
-                + "规则：分页 Tool 须带业务约束；大屏类走大屏 Tool；"
-                + "不合适或缺约束则 " + AiClarifyConstants.FENCE_LANG + "。\n"
-                + "门禁错误码：" + AiToolQueryGuard.ERROR_CODE + "（补筛选）、"
-                + AiToolQueryGuard.ERROR_WRONG_TOOL + "（换大屏/详情 Tool）、"
-                + AiToolQueryGuard.ERROR_NEED_CLARIFY + "（先澄清，本轮勿拉数）。\n";
+                + "规则：分页须带约束；大屏走大屏 Tool。"
+                + "分不清场景 → 澄清兜底；有场景无匹配 Tool → 可降级则澄清改问；"
+                + "连兜底都没有 → 明确拒绝并说明原因（禁止编造）。\n"
+                + "门禁：" + AiToolQueryGuard.ERROR_CODE + " / "
+                + AiToolQueryGuard.ERROR_WRONG_TOOL + " / "
+                + AiToolQueryGuard.ERROR_NEED_CLARIFY + "；"
+                + "编排拒绝码：" + AiQueryFallback.REFUSE_CODE + "。\n";
     }
 
     private static String toolDataPromptSection() {
         return "\n\n## Tool 大数据结果（必须遵守）\n"
-                + "压缩摘要含 refId / fields / stats / sample / rowCount。\n"
+                + "压缩摘要含 refId / fields / stats / sample / rowCount / coverage。\n"
                 + "- LIST：sample + 结果面板分页。\n"
-                + "- AGGREGATE：优先聚合返回；仅 stats.complete=true 可用本批 sum/avg 当范围内结论。\n"
+                + "- AGGREGATE：优先聚合 Tool；否则用本批 stats + coverage。"
+                + "coverage.complete=true 可将本批 sum/avg 作为范围内结论；"
+                + "complete=false 必须同时报「已覆盖 coveredRows/reportedTotal」与本批合计，"
+                + "禁止说成全量总额，禁止为凑全量多次翻页同一列表 Tool。\n"
                 + "- 大屏类（TREND/COMPARE/RANK/DISTRIBUTION）：以大屏 Tool 结果为准，"
                 + "不要用分页明细的 stats 冒充大屏指标。\n"
                 + "- 禁止再要全量原始 JSON。\n";

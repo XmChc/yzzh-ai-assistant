@@ -210,7 +210,10 @@ public final class AiQueryIntentDetector {
             case AiQueryIntents.LIST -> "\n\n# 本轮意图：明细列表（LIST）" + scopeNote + "\n"
                     + "分页展示正确；必须带业务约束；合理 pageSize，明细交给结果面板。\n";
             case AiQueryIntents.AGGREGATE -> "\n\n# 本轮意图：单值汇总（AGGREGATE）" + scopeNote + "\n"
-                    + "优先聚合 Tool；分页 Tool 仅允许有界单页，stats.complete=false 不得当全量；禁止多页加总。\n";
+                    + "优先宿主聚合/汇总 Tool（一次返回合计）。"
+                    + "仅有分页 Tool 时：只调有界单页，用 coverage + stats 回答；"
+                    + "complete=false 时可报本批合计，必须写明已覆盖行数/声明总数，禁止说成全量；"
+                    + "禁止多页循环加总（N+1）。\n";
             case AiQueryIntents.LOOKUP -> "\n\n# 本轮意图：单条定位（LOOKUP）\n"
                     + "优先详情/getById Tool；缺唯一键则 ai-clarify。\n";
             case AiQueryIntents.STATUS -> "\n\n# 本轮意图：状态/是否（STATUS）\n"

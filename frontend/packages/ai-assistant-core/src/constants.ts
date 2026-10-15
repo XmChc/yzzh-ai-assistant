@@ -28,6 +28,7 @@ export const AiAgentModes = {
 export const AiToolTypes = {
   BUILTIN: 'BUILTIN',
   OPENAPI: 'OPENAPI',
+  GOVERNED: 'GOVERNED',
 } as const;
 
 /** @ 引用关键词（对齐 AiMentionKeywords，前缀匹配忽略大小写） */
@@ -61,9 +62,18 @@ export const AiSseEventTypes = {
   TOOL_CALL: 'tool_call',
   TOOL_RESULT: 'tool_result',
   TOOL_DATA: 'tool_data',
+  TOOL_CONFIRM: 'tool_confirm',
   DELTA: 'delta',
   DONE: 'done',
   ERROR: 'error',
+} as const;
+
+/** 写操作确认协议（对齐 AiWriteConfirmConstants） */
+export const AiWriteConfirm = {
+  STATUS_NEED_CONFIRM: 'NEED_USER_CONFIRM',
+  FIELD_STATUS: 'status',
+  FIELD_TOOL: 'tool',
+  FIELD_MESSAGE: 'message',
 } as const;
 
 /** 澄清补充协议（对齐 AiClarifyConstants） */

@@ -123,6 +123,47 @@ export const ToolResultPanel = defineComponent({
       return parts.join(' · ');
     }
 
+    function renderCoverage() {
+      const c = props.data.coverage;
+      if (!c) return null;
+      const covered = c.coveredRows ?? props.data.total ?? 0;
+      const reported = c.reportedTotal ?? props.data.reportedTotal;
+      const complete = c.complete === true;
+      const ratio =
+        reported != null && reported > 0
+          ? Math.min(100, Math.round((covered / reported) * 100))
+          : complete
+            ? 100
+            : null;
+      return h(
+        'div',
+        {
+          class: ['ai-tool-coverage', complete ? 'is-complete' : 'is-partial'],
+        },
+        [
+          h(
+            'div',
+            { class: 'ai-tool-coverage-title' },
+            complete ? '数据已覆盖全部' : '部分覆盖（非全量合计）',
+          ),
+          h(
+            'div',
+            { class: 'ai-tool-coverage-meta' },
+            reported != null
+              ? `已拉取 ${covered} / ${reported} 行${ratio != null ? `（${ratio}%）` : ''}`
+              : `已拉取 ${covered} 行`,
+          ),
+          !complete
+            ? h(
+                'div',
+                { class: 'ai-tool-coverage-hint' },
+                '下方合计仅基于已拉取行；缩小时间范围或使用汇总接口可得到全量结果。',
+              )
+            : null,
+        ],
+      );
+    }
+
     function renderStats() {
       const stats = props.data.stats as
         | { columns?: Record<string, Record<string, unknown>>; scannedRows?: number; sampled?: boolean }
@@ -240,6 +281,7 @@ export const ToolResultPanel = defineComponent({
           ),
         ]),
         error.value ? h('div', { class: 'ai-tool-error' }, error.value) : null,
+        renderCoverage(),
         renderStats(),
         loading.value && !r ? h('div', { class: 'ai-tool-loading' }, '加载中…') : null,
         r ? renderTable(r, false) : null,

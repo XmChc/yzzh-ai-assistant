@@ -13,6 +13,9 @@ package cn.ysmp.ai.constants;
  *   <li>{@link AiToolQueryParamNames} — 分页/列表查询参数名约定</li>
  *   <li>{@link AiQueryIntents} — 查询意图（含大屏参数类）</li>
  *   <li>{@link AiDashboardToolMarkers} — 大屏 Tool 识别关键词</li>
+ *   <li>{@link AiAggregateToolMarkers} — 汇总 Tool 识别关键词</li>
+ *   <li>{@link AiWriteToolMarkers} — 写操作 Tool 识别关键词</li>
+ *   <li>{@link AiWriteConfirmConstants} — 写操作确认协议</li>
  *   <li>{@link AiSseEventTypes} — SSE 事件名</li>
  *   <li>{@link AiClarifyConstants} — 澄清补充协议</li>
  *   <li>{@link AiChartConstants} / {@link AiChartFormatSpecs} — 内置图表协议与格式说明</li>
@@ -20,7 +23,8 @@ package cn.ysmp.ai.constants;
  * </ul>
  *
  * <p>运行时鉴权辅助见 {@link cn.ysmp.ai.guard.AiAccessGuard}；
- * 分页查询约束见 {@link cn.ysmp.ai.guard.AiToolQueryGuard}。
+ * 分页查询约束见 {@link cn.ysmp.ai.guard.AiToolQueryGuard}；
+ * 大结果覆盖率见 {@link cn.ysmp.ai.tool.result.AiToolResultCoverage}。
  *
  * <pre>{@code
  * import static cn.ysmp.ai.constants.AiPermissionConstants.ASSISTANT_QUERY;
@@ -70,5 +74,6 @@ public final class AiConstants {
 
         public static final String BUILTIN = AiToolTypes.BUILTIN;
         public static final String OPENAPI = AiToolTypes.OPENAPI;
+        public static final String GOVERNED = AiToolTypes.GOVERNED;
     }
 }

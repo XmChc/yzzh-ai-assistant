@@ -41,11 +41,12 @@ Agent (SCENARIO|GENERAL)
 
 ### Tool 权限固化
 
-SPI `AiEndpointPermissionResolver`（宿主可替换；ysmp 默认可解析 `@PreAuthorize`）仅在以下时机写入 `ai_tool_api.required_permissions`：
+SPI `AiEndpointPermissionResolver`（宿主可替换；ysmp 默认可解析 `@PreAuthorize`）仅在以下时机**同步**写入 `ai_tool_api.required_permissions`（**禁止**管理端手填权限码 / Schema）：
 
-1. OpenAPI 勾选注册  
-2. `POST /admin-api/ai/tool-api/resync-permissions`  
-3. 应用启动 `ApplicationRunner` 回填  
+1. OpenAPI 勾选注册（同时写入双 Schema）  
+2. `POST /admin-api/ai/tool-api/resync-permissions`（从宿主注解刷新权限）  
+3. `POST /admin-api/ai/tool-api/resync-schemas`（从 OpenAPI 刷新 Schema）  
+4. 应用启动 `ApplicationRunner` 同步权限  
 
 对话热路径**不调 SPI**，只读 DB + `AiSecurityAdapter`。
 
@@ -59,6 +60,35 @@ SPI `AiEndpointPermissionResolver`（宿主可替换；ysmp 默认可解析 `@Pr
 | 管理端 CRUD 码 | 仅配置页 |
 
 可选 Agent = `access_permission` **且** 至少 1 个可用能力。
+
+### 聚合 Tool 选型（P2）
+
+OpenAPI 描述/路径含 `汇总|合计|sum|total|stat|aggregate` 等（见 `AiAggregateToolMarkers`）时视为聚合 Tool；`AGGREGATE` 意图下前置排序并标注「【汇总推荐】」。宿主应优先提供带业务权限码的汇总 HTTP 接口并勾选注册。
+
+### RBAC 适配原则（默认最优路径）
+
+助手**只适配宿主 RBAC 权限码**，不按表名、不按角色名鉴权：
+
+```text
+宿主: User → Role → PermissionCode
+助手: Tool.required_permissions ← 与 @PreAuthorize 同一套码
+运行: Catalog 预检(hasPermission) + 执行时转发 Authorization → 宿主拦截器二次鉴权/数据范围
+```
+
+| 做 | 不做 |
+|----|------|
+| Tool/Capability 绑定权限码 | 表级 ACL、助手直连业务库 |
+| OpenAPI Tool + Token 复用宿主拦截器 | 在引擎内复制数据权限 SQL 改写 |
+| 缺汇总能力时在宿主补聚合 API 再注册为 Tool | 默认多页 N+1 拼合计 |
+
+行级数据范围（本部门/本人）仍由宿主在 API 内处理；助手不解析角色数据权限。
+
+### 汇总（AGGREGATE）与覆盖率
+
+1. **优先**宿主聚合/汇总 Tool（一次返回合计，权限码同业务查询码）。  
+2. **仅有分页 Tool** 时：只允许有界单页；压缩结果带 `coverage`（`coveredRows` / `reportedTotal` / `complete` / `policy=SINGLE_BATCH_NO_N_PLUS_1`）。  
+3. `complete=true`：可用本批 `stats` 作为范围内结论。  
+4. `complete=false`：可报本批合计，**必须**同时说明已覆盖行数/声明总数；禁止说成全量；**禁止**引擎/模型多页循环加总。
 
 ### 对话编排
 
@@ -83,6 +113,30 @@ SPI `AiEndpointPermissionResolver`（宿主可替换；ysmp 默认可解析 `@Pr
 
 1. 宿主提供 `AiSecurityAdapter`（推荐）  
 2. 未提供：默认 DenyAll；`ysmp.ai.security.permit-all-when-missing=true` 才 PermitAll  
+
+## 演进路线（已定方向）
+
+| 阶段 | 内容 | 状态 |
+|------|------|------|
+| P0 | RBAC：权限码 + Tool available + Token 转发 | 已有 |
+| P1 | AGGREGATE：`coverage` 单批合计话术；禁止默认 N+1 | 已落地 |
+| P2 | 聚合 Tool 识别/`【汇总推荐】`优先；宿主注册汇总 OpenAPI | 已落地（宿主补 API） |
+| P3 | 写操作 SSE `tool_confirm` + 前端确认条（`confirmWriteTools`） | 已落地 |
+| P4 | `AiQueryCapabilityCatalog` + `AiDataScopeProvider` + `AiGovernedQueryExecutor` | SPI 已落地（默认 NoOp） |
+
+### 写操作确认
+
+命中 `AiWriteToolMarkers` 的 Tool 默认不执行，推送 SSE `tool_confirm`；前端确认后带 `confirmWriteTools=true` 重发同一问题。可用 `ysmp.ai.require-write-confirm=false` 关闭。
+
+### 受控查询 SPI（可选）
+
+宿主实现三个 Bean 后，能力会合并进本轮 tools（`toolType=GOVERNED`）：
+
+1. `AiQueryCapabilityCatalog.listAvailable()` — 已按权限码过滤  
+2. `AiDataScopeProvider.resolve(code)` — 强制行级条件  
+3. `AiGovernedQueryExecutor.execute(...)` — 同进程执行官方查询  
+
+默认均为 NoOp；优先仍用 OpenAPI + Token。
 
 ## 前端
 

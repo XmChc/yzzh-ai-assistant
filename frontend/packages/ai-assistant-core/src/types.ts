@@ -65,6 +65,14 @@ export interface AiToolDataRef {
   sampleRows?: Record<string, unknown>[];
   /** 列级汇总：数值 min/max/sum/avg，分类 top */
   stats?: Record<string, unknown>;
+  /** 本批覆盖率（汇总回答须带 covered/reported） */
+  coverage?: {
+    coveredRows?: number;
+    reportedTotal?: number;
+    uncoveredRows?: number;
+    complete?: boolean;
+    policy?: string;
+  };
   compacted?: boolean;
 }
 
@@ -86,6 +94,7 @@ export interface AiChatStreamHandlers {
   onUsage?: (usage: AiContextUsage) => void;
   onClarify?: (form: AiClarifyForm) => void;
   onToolCall?: (p: { id: string; name: string; arguments?: string }) => void;
+  onToolConfirm?: (p: { id: string; name: string; arguments?: string }) => void;
   onToolResult?: (p: { id: string; name: string; preview?: string }) => void;
   onToolData?: (data: AiToolDataRef) => void;
   onDelta?: (text: string) => void;
@@ -105,6 +114,8 @@ export interface AiChatRequest {
   skillCode?: string;
   toolCode?: string;
   message: string;
+  /** 用户已确认执行写操作 Tool */
+  confirmWriteTools?: boolean;
 }
 
 export interface AiChatResponse {

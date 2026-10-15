@@ -83,7 +83,8 @@ public class AiToolApiController {
     }
 
     /**
-     * 手动回填已注册 OPENAPI Tool 的 required_permissions（SPI 固化）。
+     * 从宿主 SPI（{@code @PreAuthorize} 等）同步已注册 OPENAPI Tool 的 {@code required_permissions}。
+     * <p>禁止管理端手填权限码；宿主改注解后调用本接口刷新固化结果。
      */
     @PostMapping("/resync-permissions")
     public AiCommonResult<Integer> resyncPermissions() {
@@ -91,7 +92,8 @@ public class AiToolApiController {
     }
 
     /**
-     * 按当前 OpenAPI 回填已注册 OPENAPI Tool 的入参/出参 JSON Schema。
+     * 从当前 OpenAPI 同步已注册 OPENAPI Tool 的入参/出参 JSON Schema。
+     * <p>禁止管理端手填 Schema；接口契约变更后调用本接口刷新。
      */
     @PostMapping("/resync-schemas")
     public AiCommonResult<Integer> resyncSchemas() {

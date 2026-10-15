@@ -17,6 +17,8 @@ interface ToolRow {
   module?: string;
   param_schema_json?: string | null;
   response_schema_json?: string | null;
+  /** 只读：由宿主 @PreAuthorize / SPI 同步，禁止手填 */
+  required_permissions?: string | null;
 }
 
 interface CatalogItem {
@@ -101,26 +103,44 @@ export const ToolApiPage = defineComponent({
       }
     }
 
-    async function resync() {
+    async function syncPermissions() {
       tip.value = '';
       try {
         const n = await resyncToolPermissions();
-        tip.value = `已回填 ${n} 个 Tool 的权限码`;
+        tip.value = `已从宿主同步 ${n} 个 Tool 的权限码（非手填）`;
         await refresh();
       } catch (e: unknown) {
         tip.value = e instanceof Error ? e.message : String(e);
       }
     }
 
-    async function resyncSchemas() {
+    async function syncSchemas() {
       tip.value = '';
       try {
         const n = await resyncToolSchemas();
-        tip.value = `已回填 ${n} 个 Tool 的入参/出参 Schema`;
+        tip.value = `已从 OpenAPI 同步 ${n} 个 Tool 的入参/出参 Schema（非手填）`;
         await refresh();
       } catch (e: unknown) {
         tip.value = e instanceof Error ? e.message : String(e);
       }
+    }
+
+    function formatPerms(raw: string | null | undefined) {
+      if (raw == null || raw === '' || raw === '[]' || raw === 'null') {
+        return '（尚未同步到权限码，请点「同步权限码」）';
+      }
+      try {
+        const arr = JSON.parse(raw) as unknown;
+        if (Array.isArray(arr) && arr.length) {
+          return arr.map(String).join('、');
+        }
+        if (Array.isArray(arr)) {
+          return '（空：宿主接口可能未声明 @PreAuthorize）';
+        }
+      } catch {
+        // plain string
+      }
+      return String(raw);
     }
 
     function visibleItems(items: CatalogItem[]) {
@@ -150,23 +170,34 @@ export const ToolApiPage = defineComponent({
       h('div', { class: 'ai-page' }, [
         h('h2', 'AI 接口（Tool）配置'),
         tip.value ? h('p', tip.value) : null,
-        h('p', { style: 'color:#666;font-size:13px' }, [
-          '从 OpenAPI 勾选接口注册并启用后进入白名单。支持 GET，以及分页等 POST 查询；',
-          '按功能模块（OpenAPI tag / 路径）分组。未注册或已停用的接口不会被 Agent 调用。',
-          '注册时会写入入参/出参 JSON Schema，供模型理解调用与返回结构。',
+        h('p', { style: 'color:#666;font-size:13px;line-height:1.55' }, [
+          '从 OpenAPI 勾选接口注册并启用后进入白名单。',
+          '权限码与入参/出参 Schema ',
+          h('strong', '仅允许从宿主同步'),
+          '（注册时自动写入；宿主改注解/OpenAPI 后点下方同步）。',
+          h('strong', '禁止在本页手填或改写权限码 / Schema'),
+          '。',
         ]),
         h('div', { class: 'actions', style: 'margin-bottom:12px;display:flex;gap:8px;flex-wrap:wrap' }, [
-          h('button', { onClick: resync }, '回填权限码（resync）'),
-          h('button', { onClick: resyncSchemas }, '同步 Schema（resync）'),
+          h('button', { onClick: syncPermissions }, '同步权限码（从宿主 @PreAuthorize）'),
+          h('button', { onClick: syncSchemas }, '同步 Schema（从 OpenAPI）'),
         ]),
-        h('h3', '已注册（启用即生效）'),
+        h('h3', '已注册（启用即生效 · 只读展示同步结果）'),
         h(
           'ul',
           tools.value.map((t) =>
-            h('li', { key: t.id, style: 'margin-bottom:10px' }, [
+            h('li', { key: t.id, style: 'margin-bottom:12px' }, [
               h(
                 'div',
                 `${t.module || '-'} | ${t.tool_code} | ${t.name} | ${enabledLabel(t.enabled)} | ${t.http_method || ''} ${t.path || ''}`,
+              ),
+              h(
+                'div',
+                {
+                  style: 'margin-top:4px;font-size:12px;color:#555',
+                  title: '只读：由同步写入，不可手填',
+                },
+                `权限码：${formatPerms(t.required_permissions)}`,
               ),
               hasSchema(t)
                 ? h(
@@ -180,19 +211,23 @@ export const ToolApiPage = defineComponent({
                         };
                       },
                     },
-                    schemaOpen.value[t.id] ? '收起 Schema' : '查看入参/出参 Schema',
+                    schemaOpen.value[t.id] ? '收起 Schema（只读）' : '查看 Schema（只读）',
                   )
-                : h('span', { style: 'margin-left:8px;color:#888;font-size:12px' }, '（无 Schema，可点同步）'),
+                : h(
+                    'span',
+                    { style: 'margin-left:8px;color:#888;font-size:12px' },
+                    '（无 Schema，请点「同步 Schema」）',
+                  ),
               schemaOpen.value[t.id]
                 ? h('div', { style: 'display:flex;gap:12px;flex-wrap:wrap;margin-top:6px' }, [
                     h('pre', {
                       style:
                         'flex:1;min-width:240px;max-height:220px;overflow:auto;background:#f7f7f7;padding:8px;font-size:11px',
-                    }, `入参 parameters:\n${prettyJson(t.param_schema_json)}`),
+                    }, `入参 parameters（只读）:\n${prettyJson(t.param_schema_json)}`),
                     h('pre', {
                       style:
                         'flex:1;min-width:240px;max-height:220px;overflow:auto;background:#f7f7f7;padding:8px;font-size:11px',
-                    }, `出参 response:\n${prettyJson(t.response_schema_json)}`),
+                    }, `出参 response（只读）:\n${prettyJson(t.response_schema_json)}`),
                   ])
                 : null,
             ]),

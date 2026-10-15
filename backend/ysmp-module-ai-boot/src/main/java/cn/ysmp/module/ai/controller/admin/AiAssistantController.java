@@ -102,6 +102,15 @@ public class AiAssistantController {
                     }
 
                     @Override
+                    public void onToolConfirm(String callId, String toolName, String argumentsJson) {
+                        Map<String, Object> p = new LinkedHashMap<>();
+                        p.put("id", callId);
+                        p.put("name", toolName);
+                        p.put("arguments", argumentsJson);
+                        send(emitter, AiSseEventTypes.TOOL_CONFIRM, p);
+                    }
+
+                    @Override
                     public void onToolResult(String callId, String toolName, String resultPreview) {
                         Map<String, Object> p = new LinkedHashMap<>();
                         p.put("id", callId);

@@ -1,33 +1,7 @@
 import { AiChart } from './constants';
+import type { AiChartSpec } from './types';
 
-export interface AiChartSeries {
-  name?: string;
-  data?: number[];
-  points?: number[][];
-}
-
-export interface AiChartIndicator {
-  name: string;
-  max: number;
-}
-
-export interface AiChartSlice {
-  name: string;
-  value: number;
-}
-
-export interface AiChartSpec {
-  type: string;
-  title?: string;
-  unit?: string;
-  categories?: string[];
-  series?: AiChartSeries[];
-  data?: AiChartSlice[];
-  smooth?: boolean;
-  xLabel?: string;
-  yLabel?: string;
-  indicators?: AiChartIndicator[];
-}
+export type { AiChartSpec } from './types';
 
 export type AiContentSegment =
   | { kind: 'markdown'; text: string }

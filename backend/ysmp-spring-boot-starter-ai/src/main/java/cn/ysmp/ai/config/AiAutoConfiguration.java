@@ -5,8 +5,14 @@ import cn.ysmp.ai.chat.AiConversationCompressor;
 import cn.ysmp.ai.llm.OpenAiCompatibleClient;
 import cn.ysmp.ai.tool.openapi.OpenApiToolExecutor;
 import cn.ysmp.ai.spi.AiChatMemory;
+import cn.ysmp.ai.spi.AiDataScopeProvider;
+import cn.ysmp.ai.spi.AiGovernedQueryExecutor;
 import cn.ysmp.ai.spi.AiLlmConfigProvider;
+import cn.ysmp.ai.spi.AiQueryCapabilityCatalog;
 import cn.ysmp.ai.spi.AiSecurityAdapter;
+import cn.ysmp.ai.spi.NoOpAiDataScopeProvider;
+import cn.ysmp.ai.spi.NoOpAiGovernedQueryExecutor;
+import cn.ysmp.ai.spi.NoOpAiQueryCapabilityCatalog;
 import cn.ysmp.ai.tool.AiTool;
 import cn.ysmp.ai.tool.AiToolCatalog;
 import cn.ysmp.ai.tool.result.AiToolResultCompactor;
@@ -73,6 +79,24 @@ public class AiAutoConfiguration {
     }
 
     @Bean
+    @ConditionalOnMissingBean(AiQueryCapabilityCatalog.class)
+    public AiQueryCapabilityCatalog aiQueryCapabilityCatalog() {
+        return NoOpAiQueryCapabilityCatalog.INSTANCE;
+    }
+
+    @Bean
+    @ConditionalOnMissingBean(AiDataScopeProvider.class)
+    public AiDataScopeProvider aiDataScopeProvider() {
+        return NoOpAiDataScopeProvider.INSTANCE;
+    }
+
+    @Bean
+    @ConditionalOnMissingBean(AiGovernedQueryExecutor.class)
+    public AiGovernedQueryExecutor aiGovernedQueryExecutor() {
+        return NoOpAiGovernedQueryExecutor.INSTANCE;
+    }
+
+    @Bean
     @ConditionalOnMissingBean
     public AiChatOrchestrator aiChatOrchestrator(AiLlmConfigProvider llmConfigProvider,
                                                  AiToolCatalog toolCatalog,
@@ -84,13 +108,17 @@ public class AiAutoConfiguration {
                                                  ObjectProvider<AiChatMemory> chatMemoryProvider,
                                                  AiProperties properties,
                                                  AiConversationCompressor conversationCompressor,
-                                                 AiToolResultCompactor toolResultCompactor) {
+                                                 AiToolResultCompactor toolResultCompactor,
+                                                 AiQueryCapabilityCatalog queryCapabilityCatalog,
+                                                 AiDataScopeProvider dataScopeProvider,
+                                                 AiGovernedQueryExecutor governedQueryExecutor) {
         List<AiTool> tools = builtinTools.getIfAvailable();
         if (tools == null) {
             tools = List.of();
         }
         return new AiChatOrchestrator(llmConfigProvider, toolCatalog, securityAdapter,
                 openAiCompatibleClient, openApiToolExecutor, tools, objectMapper,
-                chatMemoryProvider, properties, conversationCompressor, toolResultCompactor);
+                chatMemoryProvider, properties, conversationCompressor, toolResultCompactor,
+                queryCapabilityCatalog, dataScopeProvider, governedQueryExecutor);
     }
 }
