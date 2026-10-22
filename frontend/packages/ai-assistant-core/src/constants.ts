@@ -31,6 +31,12 @@ export const AiToolTypes = {
   GOVERNED: 'GOVERNED',
 } as const;
 
+/** 渠道（对齐 AiChannels；本阶段配置页固定 ADMIN） */
+export const AiChannels = {
+  ADMIN: 'ADMIN',
+  APP: 'APP',
+} as const;
+
 /** @ 引用关键词（对齐 AiMentionKeywords，前缀匹配忽略大小写） */
 export const AiMentionKeywords = {
   AGENT: 'agent',

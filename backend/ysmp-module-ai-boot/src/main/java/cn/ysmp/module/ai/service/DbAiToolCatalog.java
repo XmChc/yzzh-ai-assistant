@@ -1,6 +1,7 @@
 package cn.ysmp.module.ai.service;
 
 import cn.ysmp.ai.constants.AiAgentModes;
+import cn.ysmp.ai.constants.AiToolTypes;
 import cn.ysmp.ai.guard.AiAccessGuard;
 import cn.ysmp.ai.spi.AiSecurityAdapter;
 import cn.ysmp.ai.tool.AiCapabilityBundle;
@@ -252,21 +253,29 @@ public class DbAiToolCatalog implements AiToolCatalog {
 
     private AiToolDefinition toDefinition(ToolSnap tool, Map<String, Boolean> memo) {
         List<String> perms = tool.getRequiredPermissions() == null ? List.of() : tool.getRequiredPermissions();
-        boolean available = AiAccessGuard.hasAllPermissions(securityAdapter, perms, memo);
+        // OPENAPI：空权限码 fail-closed；其它类型仍按「空=通过」兼容
+        boolean openApi = AiToolTypes.OPENAPI.equalsIgnoreCase(tool.getToolType());
+        boolean available = openApi
+                ? AiAccessGuard.isOpenApiToolAvailable(securityAdapter, perms, memo)
+                : AiAccessGuard.hasAllPermissions(securityAdapter, perms, memo);
         String reason = null;
         if (!available) {
-            List<String> miss = perms.stream()
-                    .filter(p -> {
-                        Boolean hit = memo.get(p);
-                        if (hit != null) {
-                            return !hit;
-                        }
-                        boolean ok = securityAdapter.hasAnyPermissions(p);
-                        memo.put(p, ok);
-                        return !ok;
-                    })
-                    .collect(Collectors.toList());
-            reason = miss.isEmpty() ? "权限不足" : ("缺少 " + String.join(", ", miss));
+            if (openApi && !AiAccessGuard.hasBoundPermissionCodes(perms)) {
+                reason = "未绑定权限码（须宿主 @PreAuthorize 同步）";
+            } else {
+                List<String> miss = perms.stream()
+                        .filter(p -> {
+                            Boolean hit = memo.get(p);
+                            if (hit != null) {
+                                return !hit;
+                            }
+                            boolean ok = securityAdapter.hasAnyPermissions(p);
+                            memo.put(p, ok);
+                            return !ok;
+                        })
+                        .collect(Collectors.toList());
+                reason = miss.isEmpty() ? "权限不足" : ("缺少 " + String.join(", ", miss));
+            }
         }
         return AiToolDefinition.builder()
                 .toolCode(tool.getToolCode())
@@ -285,10 +294,11 @@ public class DbAiToolCatalog implements AiToolCatalog {
     }
 
     private boolean isToolAvailable(ToolSnap tool, Map<String, Boolean> memo) {
-        return AiAccessGuard.hasAllPermissions(
-                securityAdapter,
-                tool.getRequiredPermissions() == null ? List.of() : tool.getRequiredPermissions(),
-                memo);
+        List<String> perms = tool.getRequiredPermissions() == null ? List.of() : tool.getRequiredPermissions();
+        if (AiToolTypes.OPENAPI.equalsIgnoreCase(tool.getToolType())) {
+            return AiAccessGuard.isOpenApiToolAvailable(securityAdapter, perms, memo);
+        }
+        return AiAccessGuard.hasAllPermissions(securityAdapter, perms, memo);
     }
 
     private boolean isSkillActivated(SkillSnap skill, Snapshot snap, Map<String, Boolean> memo) {

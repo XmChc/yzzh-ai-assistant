@@ -1,4 +1,5 @@
 import { AgentPage } from './views/AgentPage';
+import { ConfigCenterPage } from './views/ConfigCenterPage';
 import { ModelConfigPage } from './views/ModelConfigPage';
 import { SkillPage } from './views/SkillPage';
 import { ToolApiPage } from './views/ToolApiPage';
@@ -8,12 +9,15 @@ export { renderMarkdown } from './markdownRender';
 export { splitContentWithCharts } from './chartParse';
 export { renderChart } from './ChartPanel';
 export { ToolResultPanel } from './ToolResultPanel';
-export { ModelConfigPage, ToolApiPage, SkillPage, AgentPage };
+export {
+  ConfigCenterPage,
+  ModelConfigPage,
+  ToolApiPage,
+  SkillPage,
+  AgentPage,
+};
 
-/** 宿主动态路由 component 映射 */
+/** 宿主动态路由 component 映射（配置入口仅 ai/config） */
 export const aiRouteViews = {
-  'ai/model-config': ModelConfigPage,
-  'ai/tool-api': ToolApiPage,
-  'ai/skill': SkillPage,
-  'ai/agent': AgentPage,
+  'ai/config': ConfigCenterPage,
 };

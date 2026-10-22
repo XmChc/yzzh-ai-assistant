@@ -2,6 +2,7 @@ package cn.ysmp.module.ai.config;
 
 import cn.ysmp.ai.spi.AiEndpointPermissionResolver;
 import cn.ysmp.module.ai.service.PreAuthorizeEndpointPermissionResolver;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
@@ -18,10 +19,14 @@ import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandl
 @ConditionalOnProperty(prefix = "ysmp.ai", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class AiPreAuthorizePermissionAutoConfiguration {
 
+    /**
+     * 宿主常有多个 {@link RequestMappingHandlerMapping}
+     * （MVC / Spring Boot Admin / Actuator），必须限定主 MVC Bean。
+     */
     @Bean
     @ConditionalOnMissingBean(AiEndpointPermissionResolver.class)
     public AiEndpointPermissionResolver preAuthorizeEndpointPermissionResolver(
-            RequestMappingHandlerMapping handlerMapping) {
+            @Qualifier("requestMappingHandlerMapping") RequestMappingHandlerMapping handlerMapping) {
         return new PreAuthorizeEndpointPermissionResolver(handlerMapping);
     }
 }

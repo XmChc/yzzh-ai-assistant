@@ -178,23 +178,36 @@ public class AiCatalogCache {
                 .build();
     }
 
+    /**
+     * 加载对话可用 Tool：仅 enabled，且渠道为 ADMIN（或未升级 channel 列时的全部行）。
+     * <p>APP 渠道行即使误启用也不进入本阶段管理端 Catalog。
+     */
     private List<Map<String, Object>> loadToolRows() {
         try {
             return jdbcTemplate.queryForList(
                     "SELECT tool_code, tool_type, name, description, http_method, path, module, "
                             + "param_schema_json, response_schema_json, required_permissions "
-                            + "FROM ai_tool_api WHERE deleted = 0 AND enabled = 1 ORDER BY module ASC, sort ASC, id ASC");
-        } catch (Exception e1) {
+                            + "FROM ai_tool_api WHERE deleted = 0 AND enabled = 1 "
+                            + "AND (channel IS NULL OR channel = '' OR UPPER(channel) = 'ADMIN') "
+                            + "ORDER BY module ASC, sort ASC, id ASC");
+        } catch (Exception e0) {
             try {
                 return jdbcTemplate.queryForList(
                         "SELECT tool_code, tool_type, name, description, http_method, path, module, "
-                                + "param_schema_json, required_permissions "
+                                + "param_schema_json, response_schema_json, required_permissions "
                                 + "FROM ai_tool_api WHERE deleted = 0 AND enabled = 1 ORDER BY module ASC, sort ASC, id ASC");
-            } catch (Exception e2) {
-                return jdbcTemplate.queryForList(
-                        "SELECT tool_code, tool_type, name, description, http_method, path, "
-                                + "param_schema_json, required_permissions "
-                                + "FROM ai_tool_api WHERE deleted = 0 AND enabled = 1 ORDER BY sort ASC, id ASC");
+            } catch (Exception e1) {
+                try {
+                    return jdbcTemplate.queryForList(
+                            "SELECT tool_code, tool_type, name, description, http_method, path, module, "
+                                    + "param_schema_json, required_permissions "
+                                    + "FROM ai_tool_api WHERE deleted = 0 AND enabled = 1 ORDER BY module ASC, sort ASC, id ASC");
+                } catch (Exception e2) {
+                    return jdbcTemplate.queryForList(
+                            "SELECT tool_code, tool_type, name, description, http_method, path, "
+                                    + "param_schema_json, required_permissions "
+                                    + "FROM ai_tool_api WHERE deleted = 0 AND enabled = 1 ORDER BY sort ASC, id ASC");
+                }
             }
         }
     }

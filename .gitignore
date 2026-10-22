@@ -1,5 +1,6 @@
 # Maven
 target/
+backend/.local-m2/
 *.iml
 .idea/
 .classpath

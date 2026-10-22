@@ -61,11 +61,29 @@ ysmp:
 
 1. 实现 `AiSecurityAdapter`：`hasAnyPermissions` 对接宿主权限码；`getAuthorizationHeader` 转发当前用户 Token。  
 2. Tool 的 `required_permissions` / Schema **只允许同步、禁止手填**：注册时从 `@PreAuthorize` + OpenAPI 写入；变更后调 `resync-permissions` / `resync-schemas`（或管理页「同步权限码 / 同步 Schema」）。  
-3. 对话热路径只读 DB 中的权限码 + Adapter 预检；真正业务鉴权/数据范围在宿主 API 内完成。  
-4. 前端 `hasPermission` 与后端权限码保持一致（见 `AiPermissions`）。  
-5. **汇总 API（推荐）**：为「月总额」等提供聚合接口，描述中带 `汇总/合计/sum/total` 等词并挂业务权限码，注册为 OpenAPI Tool；AGGREGATE 意图会优先【汇总推荐】。  
-6. **写操作确认**：默认开启（`ysmp.ai.require-write-confirm=true`）；前端确认条回传 `confirmWriteTools`。  
-7. **受控查询（可选）**：无法提供 HTTP 汇总时，实现 `AiQueryCapabilityCatalog` + `AiDataScopeProvider` + `AiGovernedQueryExecutor`（见 `docs/architecture.md`）。
+3. **OPENAPI 空权限码不可用**：同步后仍为 `[]` 会强制停用，且管理端无法启用；须为查询接口补 `@PreAuthorize`（与菜单同串）后再同步。  
+4. **ADMIN 渠道**：Catalog / 注册仅 admin-api（拒绝 `/app-api`、`/sfmp-api`、`/yard-api`）。`ai_tool_api.channel` 默认 `ADMIN`。  
+5. 对话热路径只读 DB 中的权限码 + Adapter 预检；真正业务鉴权/数据范围在宿主 API 内完成。  
+6. 前端 `hasPermission` 与后端权限码保持一致（见 `AiPermissions`）。  
+7. **汇总 API（推荐）**：为「月总额」等提供聚合接口，描述中带 `汇总/合计/sum/total` 等词并挂业务权限码，注册为 OpenAPI Tool；AGGREGATE 意图会优先【汇总推荐】。  
+8. **写操作确认**：默认开启（`ysmp.ai.require-write-confirm=true`）；前端确认条回传 `confirmWriteTools`。  
+9. **受控查询（可选）**：无法提供 HTTP 汇总时，实现 `AiQueryCapabilityCatalog` + `AiDataScopeProvider` + `AiGovernedQueryExecutor`（见 `docs/architecture.md`）。
+
+### APP 渠道（预留，默认关闭）
+
+无小程序的宿主无需任何配置。有 app 时再 opt-in：
+
+```yaml
+ysmp:
+  ai:
+    channels:
+      admin:
+        enabled: true   # 默认
+      app:
+        enabled: false  # 默认关；开启后另挂会员侧 AiSecurityAdapter，Catalog 仅 app-api
+```
+
+按渠道各注册一份 `AiSecurityAdapter`（同一接口、不同实现）；勿用管理端菜单码 Adapter 服务会员请求。本阶段**不**交付 APP 对话入口与配置 Tab。
 
 ### Tool 大数据：压缩进模 + 结果分页
 
@@ -116,7 +134,7 @@ AiEndpointPermissionResolver myResolver() {
 }
 ```
 
-未提供且无 Security 时为 NoOp（`required_permissions` 为空，执行期仍靠宿主 API 鉴权）。
+未提供且无 Security 时为 NoOp（`required_permissions` 为空 → OPENAPI Tool 不可启用/不可用，须宿主提供可解析权限的 Resolver）。
 
 ## 3. 前端
 
@@ -126,10 +144,14 @@ import { AiAssistantFloat, aiRouteViews } from '@ysmp/ai-assistant-ui';
 import '@ysmp/ai-assistant-ui/style.css';
 
 createAiAssistant({
-  baseURL: `${import.meta.env.VITE_GLOB_API_URL}/admin-api`,
-  getToken: () => accessStore.accessToken,
+  // VITE_GLOB_API_URL 已是 /admin-api，勿再拼前缀
+  baseURL: import.meta.env.VITE_GLOB_API_URL,
+  getAccessToken: () => accessStore.accessToken,
   hasPermission: (code) => hasAccessByCodes([code]),
 });
+```
+
+Controller `@RequestMapping` 使用模块路径 `/ai/**`；ysmp 等宿主按包名自动加 `/admin-api`。
 ```
 
 对话输入：`@agent` / `@skill` / `@tool`（前缀匹配，忽略大小写）打开选择框。
@@ -138,22 +160,22 @@ createAiAssistant({
 
 ## 4. 运维配置
 
-1. 模型配置并启用  
-2. OpenAPI 按模块勾选 Tool（注册时固化权限；可点「回填权限码」或重启）  
-3. 配置 Skill（绑 Tool）与 Agent（`agent_mode` + 绑 Skill）  
-4. 宿主角色勾选 `ai:assistant:query`、`ai:agent:{code}` 及业务 API 权限  
+管理端菜单进入 **AI 助手 → 助手配置**（单页 Tab：模型 / 接口 / 技能 / 智能体），按链路操作：
+
+1. **模型** Tab：新建/编辑多条 LLM 连接，并「设为默认」（对话读取默认且已启用的配置）  
+2. **接口** Tab：按模块勾选 OpenAPI 注册 Tool，启用后进入白名单；可点「同步权限码 / 同步 Schema」（禁止手填）  
+3. **技能** Tab：新建/编辑 Skill（绑 Tool + 提示词）  
+4. **智能体** Tab：新建/编辑 Agent（`agent_mode` + 绑 Skill）  
+5. 宿主角色勾选 `ai:assistant:query`、`ai:agent:{code}` 及业务 API 权限  
 
 ## 5. 权限码
 
-- `ai:assistant:query` — 对话  
-- `ai:model-config:*` / `ai:tool-api:*` / `ai:skill:*` / `ai:agent:*` — 配置 CRUD  
+- `ai:assistant:query` — 对话浮窗  
+- 配置页：角色勾选菜单「助手配置」即可进入并维护全链路（不再拆分 model/tool/skill/agent 菜单）  
 - `ai:agent:{code}` — 使用某 Agent  
 
 ## 6. 管理端页面
 
-| component | 页面 |
+| component | 说明 |
 |-----------|------|
-| `ai/model-config` | 模型 |
-| `ai/tool-api` | OpenAPI Tool + resync |
-| `ai/skill` | 技能 |
-| `ai/agent` | Agent（含 GENERAL/SCENARIO） |
+| `ai/config` | **助手配置**（唯一入口；Tab：模型 / 接口 / 技能 / 智能体） |

@@ -17,6 +17,8 @@
         <dependency>
             <groupId>cn.ysmp</groupId>
             <artifactId>ysmp-spring-boot-starter-ai</artifactId>
+            <!-- 显式版本，避免宿主 IDEA 未解析父 POM dependencyManagement 时丢掉传递依赖 -->
+            <version>${project.version}</version>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>

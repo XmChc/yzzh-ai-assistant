@@ -133,8 +133,25 @@ export async function chatStream(
   }
 }
 
-export async function getModelConfig<T = unknown>(): Promise<T> {
-  return useAiRuntime().request<T>({ method: 'GET', url: `${AiApiRoutes.MODEL_CONFIG}/get` });
+export async function listModelConfigs<T = unknown>(): Promise<T> {
+  return useAiRuntime().request<T>({ method: 'GET', url: `${AiApiRoutes.MODEL_CONFIG}/list` });
+}
+
+/** 获取模型配置；不传 id 时为默认模型 */
+export async function getModelConfig<T = unknown>(id?: number): Promise<T> {
+  return useAiRuntime().request<T>({
+    method: 'GET',
+    url: `${AiApiRoutes.MODEL_CONFIG}/get`,
+    params: id != null ? { id } : undefined,
+  });
+}
+
+export async function createModelConfig(data: unknown): Promise<number> {
+  return useAiRuntime().request<number>({
+    method: 'POST',
+    url: `${AiApiRoutes.MODEL_CONFIG}/create`,
+    data,
+  });
 }
 
 export async function updateModelConfig(data: unknown): Promise<boolean> {
@@ -142,6 +159,15 @@ export async function updateModelConfig(data: unknown): Promise<boolean> {
     method: 'PUT',
     url: `${AiApiRoutes.MODEL_CONFIG}/update`,
     data,
+  });
+}
+
+/** 设为默认模型（并启用） */
+export async function setDefaultModelConfig(id: number): Promise<boolean> {
+  return useAiRuntime().request<boolean>({
+    method: 'PUT',
+    url: `${AiApiRoutes.MODEL_CONFIG}/set-default`,
+    params: { id },
   });
 }
 
@@ -168,6 +194,24 @@ export async function registerOpenApiTool(data: {
     method: 'POST',
     url: `${AiApiRoutes.TOOL_API}/register-openapi`,
     data,
+  });
+}
+
+/** 启停已注册 Tool（启用后进入编排白名单） */
+export async function updateToolEnabled(id: number, enabled: boolean): Promise<boolean> {
+  return useAiRuntime().request<boolean>({
+    method: 'PUT',
+    url: `${AiApiRoutes.TOOL_API}/update-enabled`,
+    params: { id, enabled },
+  });
+}
+
+/** 注销已注册 Tool（软删白名单，并清理技能绑定） */
+export async function deleteToolApi(id: number): Promise<boolean> {
+  return useAiRuntime().request<boolean>({
+    method: 'DELETE',
+    url: `${AiApiRoutes.TOOL_API}/delete`,
+    params: { id },
   });
 }
 

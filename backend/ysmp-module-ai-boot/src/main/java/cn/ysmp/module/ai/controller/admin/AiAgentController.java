@@ -32,7 +32,7 @@ public class AiAgentController {
     }
 
     @GetMapping("/get")
-    public AiCommonResult<Map<String, Object>> get(@RequestParam Long id) {
+    public AiCommonResult<Map<String, Object>> get(@RequestParam("id") Long id) {
         return AiCommonResult.ok(agentAdminService.get(id));
     }
 
@@ -46,13 +46,21 @@ public class AiAgentController {
 
     @PostMapping("/create")
     public AiCommonResult<Long> create(@RequestBody AgentSaveReq req) {
-        return AiCommonResult.ok(agentAdminService.create(req));
+        try {
+            return AiCommonResult.ok(agentAdminService.create(req));
+        } catch (IllegalArgumentException e) {
+            return AiCommonResult.fail(e.getMessage());
+        }
     }
 
     @PutMapping("/update")
     public AiCommonResult<Boolean> update(@RequestBody AgentSaveReq req) {
-        agentAdminService.update(req);
-        return AiCommonResult.ok(true);
+        try {
+            agentAdminService.update(req);
+            return AiCommonResult.ok(true);
+        } catch (IllegalArgumentException e) {
+            return AiCommonResult.fail(e.getMessage());
+        }
     }
 
     @Data

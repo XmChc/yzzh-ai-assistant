@@ -159,24 +159,24 @@ public class AiAssistantController {
 
     @GetMapping(AiApiPaths.ASSISTANT_CAPABILITIES)
     public AiCommonResult<AiCapabilityBundle> capabilities(
-            @RequestParam(required = false) String agentCode) {
+            @RequestParam(value = "agentCode", required = false) String agentCode) {
         return AiCommonResult.ok(toolCatalog.resolveCapabilities(agentCode, null, null));
     }
 
     @GetMapping(AiApiPaths.ASSISTANT_SESSIONS)
     public AiCommonResult<List<Map<String, Object>>> sessions(
-            @RequestParam(required = false) Integer limit) {
+            @RequestParam(value = "limit", required = false) Integer limit) {
         int lim = limit == null ? AiLimits.DEFAULT_SESSION_LIST_LIMIT : limit;
         return AiCommonResult.ok(chatMemory.listSessions(securityAdapter.getLoginUserId(), lim));
     }
 
     @GetMapping(AiApiPaths.ASSISTANT_SESSION_MESSAGES)
-    public AiCommonResult<List<Map<String, Object>>> sessionMessages(@RequestParam String sessionId) {
+    public AiCommonResult<List<Map<String, Object>>> sessionMessages(@RequestParam("sessionId") String sessionId) {
         return AiCommonResult.ok(chatMemory.listMessages(sessionId, securityAdapter.getLoginUserId()));
     }
 
     @PostMapping(AiApiPaths.ASSISTANT_SESSION_DELETE)
-    public AiCommonResult<Boolean> deleteSession(@RequestParam String sessionId) {
+    public AiCommonResult<Boolean> deleteSession(@RequestParam("sessionId") String sessionId) {
         chatMemory.deleteSession(sessionId, securityAdapter.getLoginUserId());
         return AiCommonResult.ok(true);
     }
@@ -184,9 +184,9 @@ public class AiAssistantController {
     /** Tool 暂存结果分页 */
     @GetMapping(AiApiPaths.ASSISTANT_TOOL_RESULT_PAGE)
     public AiCommonResult<Map<String, Object>> toolResultPage(
-            @RequestParam String refId,
-            @RequestParam(required = false, defaultValue = "1") Integer page,
-            @RequestParam(required = false, defaultValue = "10") Integer pageSize) {
+            @RequestParam("refId") String refId,
+            @RequestParam(value = "page", required = false, defaultValue = "1") Integer page,
+            @RequestParam(value = "pageSize", required = false, defaultValue = "10") Integer pageSize) {
         var stored = toolResultStore.get(refId);
         if (stored.isEmpty() || !owns(stored.get().userId())) {
             return AiCommonResult.fail("结果不存在或已过期");
@@ -199,11 +199,11 @@ public class AiAssistantController {
     /** 嵌套字段分页（行内大数组/对象） */
     @GetMapping(AiApiPaths.ASSISTANT_TOOL_RESULT_FIELD)
     public AiCommonResult<Map<String, Object>> toolResultField(
-            @RequestParam String refId,
-            @RequestParam Integer rowIndex,
-            @RequestParam String field,
-            @RequestParam(required = false, defaultValue = "1") Integer page,
-            @RequestParam(required = false, defaultValue = "10") Integer pageSize) {
+            @RequestParam("refId") String refId,
+            @RequestParam("rowIndex") Integer rowIndex,
+            @RequestParam("field") String field,
+            @RequestParam(value = "page", required = false, defaultValue = "1") Integer page,
+            @RequestParam(value = "pageSize", required = false, defaultValue = "10") Integer pageSize) {
         var stored = toolResultStore.get(refId);
         if (stored.isEmpty() || !owns(stored.get().userId())) {
             return AiCommonResult.fail("结果不存在或已过期");

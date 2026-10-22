@@ -32,6 +32,7 @@
 - Skill **无**独立 `access_permission`；激活条件：绑定 Tool **全部** `available`。
 - Agent：`access_permission` + `agent_mode`（`SCENARIO` | `GENERAL`）。
 - Tool 权限 / Schema：**只允许从宿主同步**（注册 / `resync-permissions` / `resync-schemas` / 启动），**禁止**管理端或业务代码手填；**对话热路径不调 SPI**。
+- OPENAPI **空权限码 fail-closed**（`available=false`、不可启用；同步自愈停用）。ADMIN 渠道**禁止**注册 app-api / sfmp-api / yard-api；`channel` 默认 ADMIN，APP 预留 opt-in。
 - 可选 Agent：`ai:assistant:query` + Agent 权限 + 至少 1 个可用能力。
 - **RBAC 适配**：只认宿主权限码（与 `@PreAuthorize` 同源）；Catalog 预检 + 执行转发 Token；禁止表级 ACL / 助手直连业务库当默认路径。
 - **AGGREGATE**：优先聚合/GOVERNED Tool；分页仅单批 + `coverage`；禁止多页 N+1 加总。
@@ -42,7 +43,7 @@
 
 - 只改任务相关文件；不顺手大重构、不乱加文档/测试除非被要求。
 - Java 17+；前端 Vue 3 + TS，跟随现有包结构。
-- Controller `@RequestMapping` 使用 `AiApiPaths.*`，不要手写 `/admin-api/ai/...`。
+- Controller `@RequestMapping` 使用 `AiApiPaths.*`（模块路径 `/ai/**`）；宿主加 `/admin-api` 前缀，不要手写完整 URL。
 - 与宿主 RBAC 集成走 `AiSecurityAdapter` / `AiEndpointPermissionResolver` SPI，不绑死 `@PreAuthorize` 到 starter。
 
 ## 5. 改常量时的同步清单

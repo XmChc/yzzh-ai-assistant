@@ -32,19 +32,27 @@ public class AiSkillController {
     }
 
     @GetMapping("/get")
-    public AiCommonResult<Map<String, Object>> get(@RequestParam Long id) {
+    public AiCommonResult<Map<String, Object>> get(@RequestParam("id") Long id) {
         return AiCommonResult.ok(skillAdminService.get(id));
     }
 
     @PostMapping("/create")
     public AiCommonResult<Long> create(@RequestBody SkillSaveReq req) {
-        return AiCommonResult.ok(skillAdminService.create(req));
+        try {
+            return AiCommonResult.ok(skillAdminService.create(req));
+        } catch (IllegalArgumentException e) {
+            return AiCommonResult.fail(e.getMessage());
+        }
     }
 
     @PutMapping("/update")
     public AiCommonResult<Boolean> update(@RequestBody SkillSaveReq req) {
-        skillAdminService.update(req);
-        return AiCommonResult.ok(true);
+        try {
+            skillAdminService.update(req);
+            return AiCommonResult.ok(true);
+        } catch (IllegalArgumentException e) {
+            return AiCommonResult.fail(e.getMessage());
+        }
     }
 
     @Data

@@ -142,13 +142,29 @@ export const AiAssistantFloat = defineComponent({
       }
     }
 
+    const inputEl = ref<HTMLInputElement | null>(null);
+
+    /** 开启空白对话：清空当前会话态并聚焦输入框 */
     function newSession() {
+      if (loading.value) {
+        return;
+      }
       sessionId.value = undefined;
       messages.value = [];
       usage.value = null;
       toolDataList.value = [];
       pendingWriteConfirms.value = [];
       lastUserText.value = '';
+      input.value = '';
+      showPicker.value = false;
+      mentionKind.value = null;
+      skillCode.value = undefined;
+      skillLabel.value = '';
+      toolCode.value = undefined;
+      toolLabel.value = '';
+      void nextTick(() => {
+        inputEl.value?.focus();
+      });
     }
 
     async function removeSession(sid: string, e: Event) {
@@ -542,35 +558,58 @@ export const AiAssistantFloat = defineComponent({
                 h('div', { class: 'ai-session-side' }, [
                   h(
                     'button',
-                    { class: 'ai-session-new', onClick: newSession },
+                    {
+                      type: 'button',
+                      class: [
+                        'ai-session-new',
+                        !sessionId.value ? 'is-active' : '',
+                      ],
+                      disabled: loading.value,
+                      title: '开始空白对话',
+                      onClick: (e: Event) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        newSession();
+                      },
+                    },
                     '新对话',
                   ),
                   h(
                     'ul',
                     { class: 'ai-session-list' },
-                    sessions.value.map((s) =>
-                      h(
-                        'li',
-                        {
-                          class: [
-                            'ai-session-item',
-                            s.sessionId === sessionId.value ? 'active' : '',
-                          ],
-                          onClick: () => void openSession(s.sessionId),
-                        },
-                        [
-                          h('span', { class: 'ai-session-title' }, s.title || '未命名会话'),
+                    sessions.value.length
+                      ? sessions.value.map((s) =>
                           h(
-                            'button',
+                            'li',
                             {
-                              class: 'ai-session-del',
-                              onClick: (e: Event) => void removeSession(s.sessionId, e),
+                              class: [
+                                'ai-session-item',
+                                s.sessionId === sessionId.value ? 'active' : '',
+                              ],
+                              onClick: () => void openSession(s.sessionId),
                             },
-                            '×',
+                            [
+                              h('span', { class: 'ai-session-title' }, s.title || '未命名会话'),
+                              h(
+                                'button',
+                                {
+                                  type: 'button',
+                                  class: 'ai-session-del',
+                                  title: '删除会话',
+                                  onClick: (e: Event) => void removeSession(s.sessionId, e),
+                                },
+                                '×',
+                              ),
+                            ],
+                          ),
+                        )
+                      : [
+                          h(
+                            'li',
+                            { class: 'ai-session-empty' },
+                            '暂无历史会话',
                           ),
                         ],
-                      ),
-                    ),
                   ),
                 ]),
                 h('div', { class: 'ai-chat-col' }, [
@@ -724,6 +763,9 @@ export const AiAssistantFloat = defineComponent({
                           ? '思考中…'
                           : '输入问题，或 @agent / @skill / @tool',
                         disabled: loading.value,
+                        ref: (el: unknown) => {
+                          inputEl.value = (el as HTMLInputElement) || null;
+                        },
                         onInput: onInputChange,
                         onKeydown: (e: KeyboardEvent) => {
                           if (e.key === 'Escape') {
@@ -733,7 +775,11 @@ export const AiAssistantFloat = defineComponent({
                           if (e.key === 'Enter' && !showPicker.value) send();
                         },
                       }),
-                      h('button', { disabled: loading.value, onClick: send }, '发送'),
+                      h(
+                        'button',
+                        { type: 'button', disabled: loading.value, onClick: send },
+                        '发送',
+                      ),
                     ]),
                   ]),
                 ]),

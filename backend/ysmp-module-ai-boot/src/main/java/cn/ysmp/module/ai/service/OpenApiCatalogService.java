@@ -1,11 +1,15 @@
 package cn.ysmp.module.ai.service;
 
+import cn.ysmp.ai.constants.AiAdminChannelPaths;
 import cn.ysmp.ai.constants.AiApiPaths;
+import cn.ysmp.ai.constants.AiChannels;
 import cn.ysmp.ai.constants.AiHttpMethods;
 import cn.ysmp.ai.constants.AiToolTypes;
+import cn.ysmp.ai.guard.AiAccessGuard;
 import cn.ysmp.module.ai.service.catalog.AiCatalogCache;
 import cn.ysmp.module.ai.service.openapi.OpenApiToolSchemaFactory;
 import cn.ysmp.module.ai.service.openapi.OpenApiToolSchemaFactory.ToolSchemas;
+import cn.ysmp.module.ai.service.openapi.SpringdocOpenApiDocumentResolver;
 import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.oas.models.Operation;
 import io.swagger.v3.oas.models.PathItem;
@@ -13,7 +17,6 @@ import io.swagger.v3.oas.models.tags.Tag;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.util.ArrayList;
@@ -30,6 +33,7 @@ import java.util.regex.Pattern;
 /**
  * 从宿主 OpenAPI 列出可勾选候选接口（GET + POST），按功能模块分组；
  * 真正可执行范围 = 已注册且 enabled 的白名单。
+ * <p>本阶段固定 ADMIN 渠道：目录与注册仅允许 {@link AiAdminChannelPaths} 合法路径。
  */
 @Slf4j
 @RequiredArgsConstructor
@@ -39,28 +43,44 @@ public class OpenApiCatalogService {
             ".*/(page|list|get|query|export|detail|info|search)(/.*)?$",
             Pattern.CASE_INSENSITIVE);
 
-    private final ObjectProvider<OpenAPI> openAPIProvider;
+    private final SpringdocOpenApiDocumentResolver openApiDocumentResolver;
     private final JdbcTemplate jdbcTemplate;
     private final AiToolPermissionSyncService permissionSyncService;
     private final AiCatalogCache catalogCache;
     private final OpenApiToolSchemaFactory schemaFactory;
 
+    /** OpenAPI 分组目录短缓存（秒）；注册后主动失效 */
+    private static final long CATALOG_CACHE_TTL_MS = 30_000L;
+    private volatile List<CatalogModule> catalogCacheSnapshot;
+    private volatile long catalogCacheAtMs;
+
     /**
      * 可勾选候选：GET 全部 + POST 全部（写操作需人工甄别）；按 OpenAPI tag / 路径模块分组。
      */
     public List<CatalogModule> listCatalogGrouped() {
-        OpenAPI openAPI = openAPIProvider.getIfAvailable();
+        long now = System.currentTimeMillis();
+        List<CatalogModule> cached = catalogCacheSnapshot;
+        if (cached != null && now - catalogCacheAtMs < CATALOG_CACHE_TTL_MS) {
+            // registered 标记会随白名单变化，短缓存内再刷一遍 registered 即可（无 SPI 扫描）
+            return refreshRegisteredFlags(cached);
+        }
+        long t0 = now;
+        OpenAPI openAPI = openApiDocumentResolver.resolve();
         Map<String, String> tagDescriptions = tagDescriptionMap(openAPI);
         Set<String> registered = loadRegisteredKeys();
 
         List<CatalogItem> flat = new ArrayList<>();
-        if (openAPI == null || openAPI.getPaths() == null) {
-            log.warn("[ai] OpenAPI bean not found; ensure springdoc is on classpath");
+        if (openAPI == null || openAPI.getPaths() == null || openAPI.getPaths().isEmpty()) {
+            log.warn("[ai] OpenAPI paths empty; springdoc may not have scanned controllers yet");
             return List.of();
         }
         for (Map.Entry<String, PathItem> e : openAPI.getPaths().entrySet()) {
             String path = e.getKey();
             if (AiApiPaths.isAiModulePath(path)) {
+                continue;
+            }
+            // ADMIN 渠道：不展示 app-api / sfmp-api / yard-api
+            if (!AiAdminChannelPaths.isAllowed(path)) {
                 continue;
             }
             PathItem item = e.getValue();
@@ -84,7 +104,33 @@ public class OpenApiCatalogService {
                     });
                     m.getItems().add(c);
                 });
-        return new ArrayList<>(groups.values());
+        List<CatalogModule> result = new ArrayList<>(groups.values());
+        catalogCacheSnapshot = result;
+        catalogCacheAtMs = System.currentTimeMillis();
+        log.info("[ai] OpenAPI catalog built: {} modules, {} ops in {}ms",
+                result.size(), flat.size(), System.currentTimeMillis() - t0);
+        return result;
+    }
+
+    /** 注册/注销后清掉目录缓存，保证「已注册」角标即时 */
+    public void invalidateCatalogCache() {
+        catalogCacheSnapshot = null;
+        catalogCacheAtMs = 0L;
+    }
+
+    private List<CatalogModule> refreshRegisteredFlags(List<CatalogModule> cached) {
+        Set<String> registered = loadRegisteredKeys();
+        for (CatalogModule mod : cached) {
+            if (mod.getItems() == null) {
+                continue;
+            }
+            for (CatalogItem c : mod.getItems()) {
+                String key = (c.getMethod() == null ? "" : c.getMethod().toUpperCase(Locale.ROOT))
+                        + " " + c.getPath();
+                c.setRegistered(registered.contains(key));
+            }
+        }
+        return cached;
     }
 
     /** @deprecated 使用 {@link #listCatalogGrouped()} */
@@ -196,24 +242,36 @@ public class OpenApiCatalogService {
         if (method == null || path == null || path.isBlank()) {
             throw new IllegalArgumentException("method/path required");
         }
+        if (!AiAdminChannelPaths.isAllowed(path)) {
+            throw new IllegalArgumentException(AiAdminChannelPaths.rejectReason(path));
+        }
         String m = method.toUpperCase(Locale.ROOT);
         if (!AiHttpMethods.isAllowedForOpenApiTool(m)) {
             throw new IllegalArgumentException("only GET/POST can be registered as tools");
         }
         String toolCode = buildToolCode(m, path);
         String moduleKey = (module == null || module.isBlank()) ? moduleFromPath(path) : module.trim();
-        String permJson = permissionSyncService.toJson(permissionSyncService.resolveAndSerialize(m, path));
+        List<String> perms = permissionSyncService.resolveAndSerialize(m, path);
+        String permJson = permissionSyncService.toJson(perms);
+        // 无权限码不可启用；有码则注册后启用
+        boolean enable = AiAccessGuard.hasBoundPermissionCodes(perms);
         ToolSchemas schemas = resolveSchemas(m, path);
         String paramJson = schemaFactory.toJson(schemas.parametersSchema());
         String responseJson = schemaFactory.toJson(schemas.responseSchema());
+        // 含软删行：注销后再注册时复活，避免 tool_code 唯一键冲突
         List<Map<String, Object>> exists = jdbcTemplate.queryForList(
-                "SELECT id FROM ai_tool_api WHERE tool_code=? AND deleted=0 LIMIT 1", toolCode);
+                "SELECT id FROM ai_tool_api WHERE tool_code=? LIMIT 1", toolCode);
         String name = summary == null || summary.isBlank() ? toolCode : summary;
         if (exists.isEmpty()) {
-            insertTool(toolCode, name, m, path, operationId, moduleKey, permJson, paramJson, responseJson);
+            insertTool(toolCode, name, m, path, operationId, moduleKey, permJson, paramJson, responseJson, enable);
         } else {
-            updateTool(toolCode, name, m, path, operationId, moduleKey, permJson, paramJson, responseJson);
+            updateTool(toolCode, name, m, path, operationId, moduleKey, permJson, paramJson, responseJson, enable);
         }
+        if (!enable) {
+            log.warn("[ai] registered {} {} without permissions; enabled=0 until host adds @PreAuthorize",
+                    m, path);
+        }
+        invalidateCatalogCache();
         catalogCache.invalidate();
     }
 
@@ -228,9 +286,9 @@ public class OpenApiCatalogService {
      * @return 更新行数
      */
     public int resyncAllSchemas() {
-        OpenAPI openAPI = openAPIProvider.getIfAvailable();
-        if (openAPI == null || openAPI.getPaths() == null) {
-            log.warn("[ai] resync schemas skipped: OpenAPI bean not found");
+        OpenAPI openAPI = openApiDocumentResolver.resolve();
+        if (openAPI == null || openAPI.getPaths() == null || openAPI.getPaths().isEmpty()) {
+            log.warn("[ai] resync schemas skipped: OpenAPI paths empty");
             return 0;
         }
         List<Map<String, Object>> rows = jdbcTemplate.queryForList(
@@ -267,7 +325,7 @@ public class OpenApiCatalogService {
     }
 
     private ToolSchemas resolveSchemas(String method, String path) {
-        OpenAPI openAPI = openAPIProvider.getIfAvailable();
+        OpenAPI openAPI = openApiDocumentResolver.resolve();
         if (openAPI == null) {
             return new ToolSchemas(Map.of("type", "object", "properties", Map.of()), Map.of());
         }
@@ -298,37 +356,62 @@ public class OpenApiCatalogService {
 
     private void insertTool(String toolCode, String name, String method, String path,
                             String operationId, String moduleKey, String permJson,
-                            String paramJson, String responseJson) {
+                            String paramJson, String responseJson, boolean enable) {
+        int enabledFlag = enable ? 1 : 0;
+        try {
+            jdbcTemplate.update(
+                    "INSERT INTO ai_tool_api(tool_code, tool_type, name, description, enabled, http_method, path, "
+                            + "operation_id, module, channel, param_schema_json, response_schema_json, required_permissions, sort, deleted) "
+                            + "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)",
+                    toolCode, AiToolTypes.OPENAPI, name, name, enabledFlag, method, path, operationId, moduleKey,
+                    AiChannels.ADMIN, paramJson, responseJson, permJson, 0);
+            return;
+        } catch (Exception ignored) {
+            // 列不齐时降级
+        }
         try {
             jdbcTemplate.update(
                     "INSERT INTO ai_tool_api(tool_code, tool_type, name, description, enabled, http_method, path, "
                             + "operation_id, module, param_schema_json, response_schema_json, required_permissions, sort, deleted) "
-                            + "VALUES (?,?,?,?,1,?,?,?,?,?,?,?,?,0)",
-                    toolCode, AiToolTypes.OPENAPI, name, name, method, path, operationId, moduleKey,
+                            + "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,0)",
+                    toolCode, AiToolTypes.OPENAPI, name, name, enabledFlag, method, path, operationId, moduleKey,
                     paramJson, responseJson, permJson, 0);
         } catch (Exception e) {
             jdbcTemplate.update(
                     "INSERT INTO ai_tool_api(tool_code, tool_type, name, description, enabled, http_method, path, "
                             + "operation_id, module, param_schema_json, required_permissions, sort, deleted) "
-                            + "VALUES (?,?,?,?,1,?,?,?,?,?,?,?,0)",
-                    toolCode, AiToolTypes.OPENAPI, name, name, method, path, operationId, moduleKey,
+                            + "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,0)",
+                    toolCode, AiToolTypes.OPENAPI, name, name, enabledFlag, method, path, operationId, moduleKey,
                     paramJson, permJson, 0);
         }
     }
 
     private void updateTool(String toolCode, String name, String method, String path,
                             String operationId, String moduleKey, String permJson,
-                            String paramJson, String responseJson) {
+                            String paramJson, String responseJson, boolean enable) {
+        int enabledFlag = enable ? 1 : 0;
         try {
             jdbcTemplate.update(
                     "UPDATE ai_tool_api SET name=?, description=?, http_method=?, path=?, operation_id=?, module=?, "
-                            + "param_schema_json=?, response_schema_json=?, required_permissions=?, enabled=1 WHERE tool_code=?",
-                    name, name, method, path, operationId, moduleKey, paramJson, responseJson, permJson, toolCode);
+                            + "channel=?, param_schema_json=?, response_schema_json=?, required_permissions=?, enabled=?, deleted=0 "
+                            + "WHERE tool_code=?",
+                    name, name, method, path, operationId, moduleKey, AiChannels.ADMIN,
+                    paramJson, responseJson, permJson, enabledFlag, toolCode);
+            return;
+        } catch (Exception ignored) {
+            // 列不齐时降级
+        }
+        try {
+            jdbcTemplate.update(
+                    "UPDATE ai_tool_api SET name=?, description=?, http_method=?, path=?, operation_id=?, module=?, "
+                            + "param_schema_json=?, response_schema_json=?, required_permissions=?, enabled=?, deleted=0 WHERE tool_code=?",
+                    name, name, method, path, operationId, moduleKey, paramJson, responseJson, permJson,
+                    enabledFlag, toolCode);
         } catch (Exception e) {
             jdbcTemplate.update(
                     "UPDATE ai_tool_api SET name=?, description=?, http_method=?, path=?, operation_id=?, module=?, "
-                            + "param_schema_json=?, required_permissions=?, enabled=1 WHERE tool_code=?",
-                    name, name, method, path, operationId, moduleKey, paramJson, permJson, toolCode);
+                            + "param_schema_json=?, required_permissions=?, enabled=?, deleted=0 WHERE tool_code=?",
+                    name, name, method, path, operationId, moduleKey, paramJson, permJson, enabledFlag, toolCode);
         }
     }
 

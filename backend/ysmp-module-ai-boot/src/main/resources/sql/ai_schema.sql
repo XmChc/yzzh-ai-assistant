@@ -3,7 +3,9 @@
 
 CREATE TABLE IF NOT EXISTS `ai_model_config` (
   `id` bigint NOT NULL AUTO_INCREMENT,
+  `name` varchar(128) DEFAULT NULL COMMENT '配置名称',
   `enabled` bit(1) NOT NULL DEFAULT b'0' COMMENT '是否启用',
+  `default_flag` bit(1) NOT NULL DEFAULT b'0' COMMENT '是否默认模型',
   `base_url` varchar(512) DEFAULT NULL COMMENT 'OpenAI 兼容根地址',
   `api_key` varchar(512) DEFAULT NULL COMMENT 'API Key',
   `model` varchar(128) DEFAULT NULL COMMENT '模型名',
@@ -14,8 +16,14 @@ CREATE TABLE IF NOT EXISTS `ai_model_config` (
   `updater` varchar(64) DEFAULT '',
   `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   `deleted` bit(1) NOT NULL DEFAULT b'0',
-  PRIMARY KEY (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI 模型配置（单行）';
+  PRIMARY KEY (`id`),
+  KEY `idx_ai_model_default` (`default_flag`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI 模型配置（可多条，一条默认）';
+
+-- 已有库升级：
+-- ALTER TABLE `ai_model_config` ADD COLUMN `name` varchar(128) DEFAULT NULL COMMENT '配置名称' AFTER `id`;
+-- ALTER TABLE `ai_model_config` ADD COLUMN `default_flag` bit(1) NOT NULL DEFAULT b'0' COMMENT '是否默认模型' AFTER `enabled`;
+
 
 CREATE TABLE IF NOT EXISTS `ai_tool_api` (
   `id` bigint NOT NULL AUTO_INCREMENT,
@@ -28,6 +36,7 @@ CREATE TABLE IF NOT EXISTS `ai_tool_api` (
   `path` varchar(512) DEFAULT NULL,
   `operation_id` varchar(128) DEFAULT NULL,
   `module` varchar(128) DEFAULT NULL COMMENT '功能模块（OpenAPI tag / 路径首段）',
+  `channel` varchar(32) NOT NULL DEFAULT 'ADMIN' COMMENT '渠道：ADMIN 管理端 / APP 会员端（预留）',
   `param_schema_json` text COMMENT '入参 JSON Schema（OpenAI function parameters）',
   `response_schema_json` text COMMENT '出参 JSON Schema（成功响应 application/json）',
   `required_permissions` varchar(512) DEFAULT NULL COMMENT 'JSON 数组字符串',
@@ -40,14 +49,21 @@ CREATE TABLE IF NOT EXISTS `ai_tool_api` (
   `deleted` bit(1) NOT NULL DEFAULT b'0',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_ai_tool_code` (`tool_code`),
-  KEY `idx_ai_tool_module` (`module`)
+  KEY `idx_ai_tool_module` (`module`),
+  KEY `idx_ai_tool_channel` (`channel`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI Tool 接口配置';
 
 -- 已有库升级（按需执行）：
 -- ALTER TABLE `ai_tool_api` ADD COLUMN `module` varchar(128) DEFAULT NULL COMMENT '功能模块' AFTER `operation_id`;
 -- ALTER TABLE `ai_tool_api` ADD KEY `idx_ai_tool_module` (`module`);
 -- ALTER TABLE `ai_tool_api` ADD COLUMN `response_schema_json` text COMMENT '出参 JSON Schema' AFTER `param_schema_json`;
+-- ALTER TABLE `ai_tool_api` ADD COLUMN `channel` varchar(32) NOT NULL DEFAULT 'ADMIN' COMMENT '渠道：ADMIN/APP' AFTER `module`;
+-- ALTER TABLE `ai_tool_api` ADD KEY `idx_ai_tool_channel` (`channel`);
 -- 若曾加过 read_only 可删除：ALTER TABLE `ai_tool_api` DROP COLUMN `read_only`;
+-- 清理：停用空权限或非 ADMIN 合法路径（也可点管理端「同步权限码」自愈）
+-- UPDATE ai_tool_api SET enabled=0 WHERE deleted=0 AND tool_type='OPENAPI'
+--   AND (required_permissions IS NULL OR required_permissions='' OR required_permissions='[]'
+--        OR path LIKE '/app-api%' OR path LIKE '/sfmp-api%' OR path LIKE '/yard-api%');
 
 CREATE TABLE IF NOT EXISTS `ai_skill` (
   `id` bigint NOT NULL AUTO_INCREMENT,

@@ -7,6 +7,8 @@ package cn.ysmp.ai.constants;
  *   <li>{@link AiPermissionConstants} — 门禁权限码</li>
  *   <li>{@link AiAgentModes} — Agent 模式</li>
  *   <li>{@link AiToolTypes} — Tool 类型</li>
+ *   <li>{@link AiChannels} — Tool/Agent 渠道（ADMIN / APP）</li>
+ *   <li>{@link AiAdminChannelPaths} — ADMIN 渠道可注册路径</li>
  *   <li>{@link AiApiPaths} — 管理端路径</li>
  *   <li>{@link AiHttpMethods} — 允许的 HTTP 方法</li>
  *   <li>{@link AiLimits} — 数值上限（含 tool 多轮 / SSE 分块）</li>

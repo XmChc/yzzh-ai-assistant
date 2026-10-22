@@ -3,7 +3,7 @@
  * <p>
  * 宿主只需依赖本模块：自动装配 Controller、表访问、OpenAPI 勾选、默认/可替换安全适配。
  * <ul>
- *   <li>{@code controller.admin} — /admin-api/ai/**</li>
+ *   <li>{@code controller.admin} — {@code /ai/**}（宿主加 /admin-api 前缀）</li>
  *   <li>{@code service.*} — 模型 / Tool / Skill / Agent / OpenAPI 目录</li>
  *   <li>{@code config} — Boot 自动装配（在 starter 之后）</li>
  * </ul>

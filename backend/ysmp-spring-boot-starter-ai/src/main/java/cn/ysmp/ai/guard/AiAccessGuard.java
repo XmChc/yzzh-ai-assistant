@@ -32,7 +32,35 @@ public final class AiAccessGuard {
     }
 
     /**
-     * 是否具备全部权限码（空列表视为通过）。
+     * 权限列表是否含至少一条非空权限码。
+     * <p>OPENAPI Tool 空列表 = 未绑定宿主权限，Catalog 不可用（fail-closed）。
+     */
+    public static boolean hasBoundPermissionCodes(Iterable<String> permissions) {
+        if (permissions == null) {
+            return false;
+        }
+        for (String p : permissions) {
+            if (p != null && !p.isBlank()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * OPENAPI Tool 是否对当前用户 available：须已绑定非空权限码，且用户具备全部码。
+     */
+    public static boolean isOpenApiToolAvailable(AiSecurityAdapter security,
+                                                 Iterable<String> permissions,
+                                                 Map<String, Boolean> memo) {
+        if (!hasBoundPermissionCodes(permissions)) {
+            return false;
+        }
+        return hasAllPermissions(security, permissions, memo);
+    }
+
+    /**
+     * 是否具备全部权限码（空列表视为通过；勿用于 OPENAPI Tool 预检，见 {@link #isOpenApiToolAvailable}）。
      */
     public static boolean hasAllPermissions(AiSecurityAdapter security, Iterable<String> permissions) {
         return hasAllPermissions(security, permissions, null);

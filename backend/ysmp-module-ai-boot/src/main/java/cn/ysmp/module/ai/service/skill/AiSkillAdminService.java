@@ -41,13 +41,14 @@ public class AiSkillAdminService {
 
     @Transactional
     public Long create(SkillSaveReq req) {
+        String skillCode = requireCodeName(req);
         KeyHolder keyHolder = new GeneratedKeyHolder();
         jdbcTemplate.update(con -> {
             PreparedStatement ps = con.prepareStatement(
                     "INSERT INTO ai_skill(skill_code, name, enabled, system_prompt, remark, deleted) VALUES (?,?,?,?,?,0)",
                     Statement.RETURN_GENERATED_KEYS);
-            ps.setString(1, req.getSkillCode());
-            ps.setString(2, req.getName());
+            ps.setString(1, skillCode);
+            ps.setString(2, req.getName().trim());
             ps.setBoolean(3, req.getEnabled() == null || req.getEnabled());
             ps.setString(4, req.getSystemPrompt());
             ps.setString(5, req.getRemark());
@@ -61,13 +62,28 @@ public class AiSkillAdminService {
 
     @Transactional
     public void update(SkillSaveReq req) {
+        if (req.getId() == null) {
+            throw new IllegalArgumentException("技能 id 不能为空");
+        }
+        String skillCode = requireCodeName(req);
         jdbcTemplate.update(
                 "UPDATE ai_skill SET skill_code=?, name=?, enabled=?, system_prompt=?, remark=? WHERE id=? AND deleted=0",
-                req.getSkillCode(), req.getName(),
+                skillCode, req.getName().trim(),
                 req.getEnabled() == null || req.getEnabled(),
                 req.getSystemPrompt(), req.getRemark(), req.getId());
         replaceTools(req.getId(), req.getToolCodes());
         catalogCache.invalidate();
+    }
+
+    /** 编码、名称必填；禁止空串脏数据落库 */
+    private static String requireCodeName(SkillSaveReq req) {
+        if (req.getSkillCode() == null || req.getSkillCode().isBlank()) {
+            throw new IllegalArgumentException("技能编码不能为空");
+        }
+        if (req.getName() == null || req.getName().isBlank()) {
+            throw new IllegalArgumentException("技能名称不能为空");
+        }
+        return req.getSkillCode().trim();
     }
 
     private void replaceTools(Long skillId, List<String> toolCodes) {

@@ -24,6 +24,7 @@ import cn.ysmp.module.ai.service.PermitAllAiSecurityAdapter;
 import cn.ysmp.module.ai.service.agent.AiAgentAdminService;
 import cn.ysmp.module.ai.service.catalog.AiCatalogCache;
 import cn.ysmp.module.ai.service.openapi.OpenApiToolSchemaFactory;
+import cn.ysmp.module.ai.service.openapi.SpringdocOpenApiDocumentResolver;
 import cn.ysmp.module.ai.service.skill.AiSkillAdminService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.swagger.v3.oas.models.OpenAPI;
@@ -32,6 +33,7 @@ import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.AutoConfigureAfter;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -109,15 +111,26 @@ public class AiBootAutoConfiguration {
         return new OpenApiToolSchemaFactory(objectMapper);
     }
 
+    /**
+     * 从 springdoc 扫描结果取完整 OpenAPI（含 paths），避免只用空壳 OpenAPI Bean。
+     */
     @Bean
     @ConditionalOnMissingBean
-    public OpenApiCatalogService openApiCatalogService(ObjectProvider<OpenAPI> openAPIProvider,
+    public SpringdocOpenApiDocumentResolver springdocOpenApiDocumentResolver(
+            ApplicationContext applicationContext,
+            ObjectProvider<OpenAPI> openAPIProvider) {
+        return new SpringdocOpenApiDocumentResolver(applicationContext, openAPIProvider);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    public OpenApiCatalogService openApiCatalogService(SpringdocOpenApiDocumentResolver openApiDocumentResolver,
                                                        JdbcTemplate jdbcTemplate,
                                                        AiToolPermissionSyncService permissionSyncService,
                                                        AiCatalogCache catalogCache,
                                                        OpenApiToolSchemaFactory schemaFactory) {
         return new OpenApiCatalogService(
-                openAPIProvider, jdbcTemplate, permissionSyncService, catalogCache, schemaFactory);
+                openApiDocumentResolver, jdbcTemplate, permissionSyncService, catalogCache, schemaFactory);
     }
 
     @Bean

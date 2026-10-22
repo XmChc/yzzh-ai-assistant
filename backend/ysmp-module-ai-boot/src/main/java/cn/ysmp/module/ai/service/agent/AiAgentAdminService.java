@@ -105,8 +105,10 @@ public class AiAgentAdminService {
 
     @Transactional
     public Long create(AgentSaveReq req) {
+        String agentCode = requireCodeName(req);
+        String name = req.getName().trim();
         String access = req.getAccessPermission() == null || req.getAccessPermission().isBlank()
-                ? AiPermissionConstants.agentAccess(req.getAgentCode())
+                ? AiPermissionConstants.agentAccess(agentCode)
                 : req.getAccessPermission();
         String mode = AiAgentModes.normalize(req.getAgentMode());
         KeyHolder keyHolder = new GeneratedKeyHolder();
@@ -116,8 +118,8 @@ public class AiAgentAdminService {
                         "INSERT INTO ai_agent(agent_code, name, enabled, system_prompt, access_permission, agent_mode, default_flag, remark, deleted) "
                                 + "VALUES (?,?,?,?,?,?,?,?,0)",
                         Statement.RETURN_GENERATED_KEYS);
-                ps.setString(1, req.getAgentCode());
-                ps.setString(2, req.getName());
+                ps.setString(1, agentCode);
+                ps.setString(2, name);
                 ps.setBoolean(3, req.getEnabled() == null || req.getEnabled());
                 ps.setString(4, req.getSystemPrompt());
                 ps.setString(5, access);
@@ -132,8 +134,8 @@ public class AiAgentAdminService {
                         "INSERT INTO ai_agent(agent_code, name, enabled, system_prompt, access_permission, default_flag, remark, deleted) "
                                 + "VALUES (?,?,?,?,?,?,?,0)",
                         Statement.RETURN_GENERATED_KEYS);
-                ps.setString(1, req.getAgentCode());
-                ps.setString(2, req.getName());
+                ps.setString(1, agentCode);
+                ps.setString(2, name);
                 ps.setBoolean(3, req.getEnabled() == null || req.getEnabled());
                 ps.setString(4, req.getSystemPrompt());
                 ps.setString(5, access);
@@ -153,15 +155,20 @@ public class AiAgentAdminService {
 
     @Transactional
     public void update(AgentSaveReq req) {
+        if (req.getId() == null) {
+            throw new IllegalArgumentException("智能体 id 不能为空");
+        }
+        String agentCode = requireCodeName(req);
+        String name = req.getName().trim();
         String access = req.getAccessPermission() == null || req.getAccessPermission().isBlank()
-                ? AiPermissionConstants.agentAccess(req.getAgentCode())
+                ? AiPermissionConstants.agentAccess(agentCode)
                 : req.getAccessPermission();
         String mode = AiAgentModes.normalize(req.getAgentMode());
         try {
             jdbcTemplate.update(
                     "UPDATE ai_agent SET agent_code=?, name=?, enabled=?, system_prompt=?, access_permission=?, agent_mode=?, default_flag=?, remark=? "
                             + "WHERE id=? AND deleted=0",
-                    req.getAgentCode(), req.getName(),
+                    agentCode, name,
                     req.getEnabled() == null || req.getEnabled(),
                     req.getSystemPrompt(), access, mode,
                     Boolean.TRUE.equals(req.getDefaultFlag()),
@@ -170,7 +177,7 @@ public class AiAgentAdminService {
             jdbcTemplate.update(
                     "UPDATE ai_agent SET agent_code=?, name=?, enabled=?, system_prompt=?, access_permission=?, default_flag=?, remark=? "
                             + "WHERE id=? AND deleted=0",
-                    req.getAgentCode(), req.getName(),
+                    agentCode, name,
                     req.getEnabled() == null || req.getEnabled(),
                     req.getSystemPrompt(), access,
                     Boolean.TRUE.equals(req.getDefaultFlag()),
@@ -185,6 +192,17 @@ public class AiAgentAdminService {
 
     private void clearOtherDefaults(Long keepId) {
         jdbcTemplate.update("UPDATE ai_agent SET default_flag=0 WHERE id<>? AND deleted=0", keepId);
+    }
+
+    /** 编码、名称必填；禁止空串脏数据落库 */
+    private static String requireCodeName(AgentSaveReq req) {
+        if (req.getAgentCode() == null || req.getAgentCode().isBlank()) {
+            throw new IllegalArgumentException("智能体编码不能为空");
+        }
+        if (req.getName() == null || req.getName().isBlank()) {
+            throw new IllegalArgumentException("智能体名称不能为空");
+        }
+        return req.getAgentCode().trim();
     }
 
     private void replaceSkills(Long agentId, List<Long> skillIds) {

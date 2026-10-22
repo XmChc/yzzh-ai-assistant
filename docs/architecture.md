@@ -30,7 +30,7 @@ Agent (SCENARIO|GENERAL)
 
 ### Skill 激活
 
-绑定的每个 Tool 均为 `available`（用户具备全部非空 `required_permissions`）才激活；未激活则**不**部分下发其 Tool。
+绑定的每个 Tool 均为 `available`（OPENAPI 须**已绑定非空** `required_permissions`，且用户具备全部码）才激活；未激活则**不**部分下发其 Tool。
 
 ### Agent 模式
 
@@ -39,7 +39,16 @@ Agent (SCENARIO|GENERAL)
 | **SCENARIO** | Agent 下已激活 Skill 的 Tools | system 短清单（未激活 Skill + 缺权） |
 | **GENERAL** | 用户全部 available Tool；已激活 Skill 作路由名录 | 不报缺权 |
 
-### Tool 权限固化
+### 渠道（channel）
+
+| 渠道 | 本阶段 | API 前缀 | 鉴权 |
+|------|--------|----------|------|
+| **ADMIN** | 默认启用 | 仅 admin-api（拒绝 app-api / sfmp-api / yard-api） | 宿主 `AiSecurityAdapter` + `@PreAuthorize` 权限码 |
+| **APP** | 预留，默认关 | 未来仅 app-api | 另挂会员侧 `AiSecurityAdapter` 实现；宿主 opt-in |
+
+`ai_tool_api.channel` 默认 `ADMIN`。对话 Catalog 只加载 ADMIN。APP 由 yaml `ysmp.ai.channels.app.enabled`（未来）+ 宿主 Adapter 打开；无 app 项目零配置。
+
+### Tool 权限固化与 fail-closed
 
 SPI `AiEndpointPermissionResolver`（宿主可替换；ysmp 默认可解析 `@PreAuthorize`）仅在以下时机**同步**写入 `ai_tool_api.required_permissions`（**禁止**管理端手填权限码 / Schema）：
 
@@ -47,6 +56,8 @@ SPI `AiEndpointPermissionResolver`（宿主可替换；ysmp 默认可解析 `@Pr
 2. `POST /admin-api/ai/tool-api/resync-permissions`（从宿主注解刷新权限）  
 3. `POST /admin-api/ai/tool-api/resync-schemas`（从 OpenAPI 刷新 Schema）  
 4. 应用启动 `ApplicationRunner` 同步权限  
+
+**空权限码 = 不可用 / 不可启用**；同步后仍为空或路径非 ADMIN 合法 → 强制 `enabled=0`。注册时无权限码则写入白名单但默认停用。
 
 对话热路径**不调 SPI**，只读 DB + `AiSecurityAdapter`。
 
